@@ -1,0 +1,15 @@
+# Virtual Environment
+venv/
+.env
+
+# Bytecode and Cache
+__pycache__/
+*.py[cod]
+
+# Logs and Databases
+*.log
+db.sqlite3
+
+# IDE and Editor Files
+.vscode/
+.idea/
