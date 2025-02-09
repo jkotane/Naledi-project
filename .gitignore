@@ -13,3 +13,4 @@ db.sqlite3
 # IDE and Editor Files
 .vscode/
 .idea/
+config.py
