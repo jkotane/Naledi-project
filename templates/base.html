@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Naledi{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="logo">
+                <a href="{{ url_for('main.index') }}">Naledi</a>
+            </div>
+            <ul class="nav-links">
+                {% if current_user.is_authenticated %}
+                    <!-- {% if current_user.role == 'spaza' %} -->
+                        <!-- Menu for Spaza users -->
+                     
+                    <a class="nav-item nav-link" href="{{ url_for('spachainauth.services') }}">Services</a> 
+                    <a class="nav-item nav-link" href="{{ url_for('spachainauth.register_store') }}">Store</a> 
+                    <a class="nav-item nav-link" href="{{ url_for('spachainauth.logout') }}">Logout</a>
+                    <a class="nav-item nav-link" href="{{ url_for('spachainauth.profile') }}">Profile</a>
+                    <a class="nav-item nav-link" href="{{ url_for('mncchain.dashboard') }}">Municipal Dashbpard</a>
+                    <li><a href="{{ url_for('auth.logout') }}">Logout</a></li>
+                {% else %}
+                    <!-- Menu for unauthenticated users -->
+                    <li><a href="{{ url_for('auth.login') }}">Login</a></li>
+                    <li><a href="{{ url_for('auth.signup') }}">Signup</a></li>
+                {% endif %}
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <p>&copy; 2025 Naledi. All rights reserved.</p>
+    </footer>
+</body>
+</html>

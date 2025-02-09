@@ -1,0 +1,26 @@
+{% extends "naledibase.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+{% if current_user.is_authenticated %}
+  <!-- Show personalized content for logged-in users -->
+  <div class="text-center">
+    <h1>Welcome back, {{ current_user.username }}!</h1>
+    <p>Thank you for being part of the Naledi Platform.</p>
+  </div>
+  <div class="landing-graphic">
+    <img src="{{ url_for('static', filename='images/kidsstorefront.jpg') }}" alt="Landing Graphic" />
+  </div>
+{% else %}
+  <!-- Show the graphic and login form for unauthenticated users -->
+  <div class="landing-text text-center">
+    <h1>Welcome to Naledi Platform</h1>
+    <p>Making local shops safe for everyone!</p>
+  </div>
+  <div class="landing-graphic">
+    <img src="{{ url_for('static', filename='images/kidsstorefront.jpg') }}" alt="Landing Graphic" />
+  </div>
+{% endif %}
+{% endblock %}
+
