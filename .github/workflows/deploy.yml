@@ -1,0 +1,36 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Google Cloud (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: "projects/891653303521/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider"
+          service_account: "github-actions-deployer@spazachain.iam.gserviceaccount.com"
+
+      - name: Configure Docker for Google Artifact Registry
+        run: gcloud auth configure-docker gcr.io
+
+      - name: Build & Push Docker Image
+        run: |
+          docker build -t gcr.io/spazachain/naledi-app:$GITHUB_SHA .
+          docker push gcr.io/spazachain/naledi-app:$GITHUB_SHA
+
+      - name: Deploy to Google Cloud Run
+        run: |
+          gcloud run deploy naledi-app \
+            --image gcr.io/spazachain/naledi-app:$GITHUB_SHA \
+            --platform managed \
+            --region africa-south1 \
+            --allow-unauthenticated
