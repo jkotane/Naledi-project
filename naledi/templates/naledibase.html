@@ -69,6 +69,8 @@
                         
                         <!-- Conditional Compliance Dropdown Menu -->
                         {% if store and (store.reg_status == 'registered' or store.reg_status=='draft') %}
+                         <a class="nav-item nav-link" href="{{ url_for('spachainauth.spachainauth_upload_docs') }}">Documents</a>
+                            
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle" href="#" id="complianceDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                                     Compliance
@@ -101,39 +103,52 @@
     
      <!-- Progress Bar for Registration Status -->
 <!-- Progress Bar for Registration Status -->
+{% if current_user.is_authenticated %}
 <div class="container mt-4">
     <h3 class="text-center">Registration Progress</h3>
-    <div class="progress-bar-container">
-        <!-- Milestone 1: User Profile -->
-        <div class="progress-circle" id="milestone-1">
-            <span>1</span>
+    <div class="progress-bar-container d-flex justify-content- align-items-left">
+        <div class="progress-item text-left">
+            <!-- Milestone 1: Profile -->
+            <div class="progress-circle" id="milestone-1">
+                <span>1</span>
+            </div>
+            <p class="progress-label">Profile</p>
         </div>
 
-        <!-- Line Connecting Milestone 1 to 2 -->
         <div class="progress-line"></div>
 
-        <!-- Milestone 2: Registration -->
-        <div class="progress-circle" id="milestone-2">
-            <span>2</span>
+        <div class="progress-item text-center">
+            <!-- Milestone 2: Owner Registration -->
+            <div class="progress-circle" id="milestone-2">
+                <span>2</span>
+            </div>
+            <p class="progress-label">Owner Registration</p>
         </div>
 
-        <!-- Line Connecting Milestone 2 to 3 -->
         <div class="progress-line"></div>
 
-        <!-- Milestone 3: Store Registration -->
-        <div class="progress-circle" id="milestone-3">
-            <span>3</span>
+        <div class="progress-item text-center">
+            <!-- Milestone 3: Store Registration -->
+            <div class="progress-circle" id="milestone-3">
+                <span>3</span>
+            </div>
+            <p class="progress-label">Store Registration</p>
         </div>
 
-        <!-- Line Connecting Milestone 3 to 4 -->
         <div class="progress-line"></div>
 
-        <!-- Milestone 4: Document Upload -->
-        <div class="progress-circle" id="milestone-4">
-            <span>4</span>
+        <div class="progress-item text-center">
+            <!-- Milestone 4: Documents Upload -->
+            <div class="progress-circle" id="milestone-4">
+                <span>4</span>
+            </div>
+            <p class="progress-label">Documents Upload</p>
         </div>
     </div>
 </div>
+{% endif %}
+
+
  <!-- Link to external JS -->
  <script src="{{ url_for('static', filename='js/progress.js') }}"></script>
 

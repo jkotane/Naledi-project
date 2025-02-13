@@ -9,6 +9,9 @@ from naledi import oauth
 from naledi import db, os
 from google.cloud import storage
 from naledi.utils import allowed_file, upload_to_gcs
+#from config import ALLOWED_EXTENSIONS as allowed_extensions
+from naledi.utils import is_valid_cellno, allowed_file, upload_to_gcs   
+
 
 
 
@@ -513,37 +516,108 @@ def spachainauth_building():
 @spachainauth.route('/upload_docs', methods=['GET', 'POST'])
 @login_required
 def spachainauth_upload_docs():
-    if request.method == 'POST':
-        # List of document types and corresponding field names
-        document_types = {
-            'id_passport_visa': 'ID/Passport/Visa',
-            'cipc': 'CIPC',
-            'sars': 'SARS Tax Clearance',
-            'permit': 'Permit',
-            'building_plans': 'Building Plans'
-        }
+    """Allow users to upload some documents now and return later."""
 
-        # Loop through the document types and process the files
+    document_types = {
+        'id_passport_visa': 'ID/Passport/Visa [Required for all owners]',
+        'proof_of_address': 'Proof of Address [ Utility Bill or Letter from Municipality]',
+        'permit': 'Permit [Municipal Trading Permit]',
+        'health_certificate': 'Certificate of Acceptability [ Issued by the Environmental Health Department of the municipality ]',
+        'zoning_certificate': 'Zoning certificate or Special Consent Approval[To be obtaioned from the Municipality]',
+        'building_plans': 'Building plans [Required for any building alterations or new buildings]',
+        'title_deed_or_Lease agreement': 'Title deed or Lease Agreement',
+        'banking_confirmation': 'Banking confirmation [ Proof of your South African Bank Account]',
+        'cipc': 'CIPC [ Company Registration Certificate]',
+        'sars': 'SARS Tax Clearance [ This can be obtained from SARS to show you dont have outstanding taxes]',
+        'affidavit': 'Affidavit [Proof that you are not engaged in illegal trading of goods]'   
+    }
+
+    # Fetch already uploaded documents
+    existing_docs = {doc.document_type: doc for doc in Document.query.filter_by(user_id=current_user.id).all()}
+
+    if request.method == 'POST':
         for field_name, document_type in document_types.items():
             file = request.files.get(field_name)
             if file and allowed_file(file.filename):
-                # Secure the filename to prevent path traversal
                 filename = secure_filename(file.filename)
                 destination_blob_name = f'{current_user.id}/{document_type}_{filename}'
-                
-                # Upload file to Google Cloud Storage
                 file_url = upload_to_gcs(file, destination_blob_name)
-                
-                # Store the document in the database
-                document = Document(
-                    user_id=current_user.id,
-                    document_type=document_type,
-                    file_url=file_url,
-                    filename=filename
-                )
-                db.session.add(document)
-                db.session.commit()
 
-        return 'Documents uploaded successfully!', 200
+                if document_type in existing_docs:
+                    # ✅ Update existing document
+                    existing_docs[document_type].file_url = file_url
+                    existing_docs[document_type].filename = filename
+                else:
+                    # ✅ Add new document
+                    new_document = Document(
+                        user_id=current_user.id,
+                        document_type=document_type,
+                        file_url=file_url,
+                        filename=filename
+                    )
+                    db.session.add(new_document)
 
-    return render_template('spachainauth_upload_docs.html')
+        db.session.commit()
+        flash('Documents uploaded successfully!', 'success')
+        return redirect(url_for('spachainauth.spachainauth_upload_docs'))
+        #return render_template('spachainauth_upload_docs.html', existing_docs=existing_docs)
+
+    # ✅ Identify missing documents
+    missing_docs = {key: value for key, value in document_types.items() if value not in existing_docs}
+
+    return render_template('spachainauth_upload_docs.html', existing_docs=existing_docs, missing_docs=missing_docs)
+
+
+@spachainauth.route('/view_docs', methods=['GET', 'POST'])
+@login_required
+def spachainauth_view_docs():
+    """Allows users to view and update uploaded documents."""
+    
+    document_types = {
+        'id_passport_visa': 'ID/Passport/Visa [Required for all owners]',
+        'proof_of_address': 'Proof of Address [ Utility Bill or Letter from Municipality]',
+        'permit': 'Permit [Municipal Trading Permit]',
+        'health_certificate': 'Certificate of Acceptability [ Issued by the Environmental Health Department of the municipality ]',
+        'zoning_certificate': 'Zoning certificate or Special Consent Approval[To be obtaioned from the Municipality]',
+        'building_plans': 'Building plans [Required for any building alterations or new buildings]',
+        'title_deed_or_Lease agreement': 'Title deed or Lease Agreement',
+        'banking_confirmation': 'Banking confirmation [ Proof of your South African Bank Account]',
+        'cipc': 'CIPC [ Company Registration Certificate]',
+        'sars': 'SARS Tax Clearance [ This can be obtained from SARS to show you dont have outstanding taxes]',
+        'affidavit': 'Affidavit [Proof that you are not engaged in illegal trading of goods]'   
+    }
+
+    # Fetch existing documents
+    existing_docs = {doc.document_type: doc for doc in Document.query.filter_by(user_id=current_user.id).all()}
+    
+    if request.method == 'POST':
+        for field_name, document_type in document_types.items():
+            file = request.files.get(field_name)
+            if file and allowed_file(file.filename):
+                filename = secure_filename(file.filename)
+                destination_blob_name = f'{current_user.id}/{document_type}_{filename}'
+                file_url = upload_to_gcs(file, destination_blob_name)
+
+                if document_type in existing_docs:
+                    # ✅ Update existing document
+                    existing_docs[document_type].file_url = file_url
+                    existing_docs[document_type].filename = filename
+                else:
+                    # ✅ Add new document (shouldn't happen here, but as a fallback)
+                    new_document = Document(
+                        user_id=current_user.id,
+                        document_type=document_type,
+                        file_url=file_url,
+                        filename=filename
+                    )
+                    db.session.add(new_document)
+
+        db.session.commit()
+        return redirect(url_for('spachainauth.spachainauth_view_docs'))  # Refresh page after update
+
+    return render_template('spachainauth_view_docs.html', existing_docs=existing_docs)
+
+
+
+
+

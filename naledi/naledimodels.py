@@ -199,6 +199,7 @@ class HealthCompliance(db.Model):
 class Document(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user_profile.id'), nullable=False)
+    document_type = db.Column(db.String(100), nullable=False)
     file_url = db.Column(db.String(255), nullable=False)
     filename = db.Column(db.String(255), nullable=False)
     uploaded_at = db.Column(db.DateTime, default=db.func.current_timestamp())

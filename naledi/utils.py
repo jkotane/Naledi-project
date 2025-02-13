@@ -4,6 +4,9 @@ from google.cloud import storage
 from google.auth.transport.requests import Request
 from google.auth import identity_pool
 from google.auth import credentials
+from datetime import timedelta
+
+ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg', 'png'}
 
 
 
@@ -53,7 +56,7 @@ def upload_to_gcs(file, destination_blob_name):
     file_url = blob.public_url
     return file_url
 
-def allowed_file(filename, allowed_extensions):
+def allowed_file(filename):
     """
     Check if a file is allowed based on its extension.
     
@@ -61,35 +64,28 @@ def allowed_file(filename, allowed_extensions):
     :param allowed_extensions: A set of allowed file extensions
     :return: True if file extension is allowed, False otherwise
     """
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # utils.py (if you are using this for GCS upload)
 from google.cloud import storage
 
 def upload_to_gcs(file, destination_blob_name):
-    """
-    Upload a file to Google Cloud Storage.
-
-    :param file: File object
-    :param destination_blob_name: The desired name of the file in GCS
-    :return: The public URL of the uploaded file
-    """
-    # Initialize the storage client
+    """Uploads a file to Google Cloud Storage and returns a signed URL for authenticated users."""
+    
+    # Authenticate with Workload Identity or ADC
     storage_client = storage.Client()
 
-    # Your bucket name from GCS
-    bucket_name = 'your-gcs-bucket-name'  # Change this to your actual bucket name
+    bucket_name = "spaza-docs-bucket"  # Change to your bucket name
     bucket = storage_client.bucket(bucket_name)
-
-    # Upload the file to the bucket
     blob = bucket.blob(destination_blob_name)
+
+    # Upload the file
     blob.upload_from_file(file)
 
-    # Optionally, make the file publicly accessible
-    blob.make_public()
+    # Generate a signed URL (Valid for 15 minutes)
+    #signed_url = blob.generate_signed_url(expiration=timedelta(minutes=15))
 
-    # Return the public URL of the file
-    return blob.public_url
+    return f"https://storage.googleapis.com/{bucket_name}/{destination_blob_name}"
 
 def get_storage_client():
     """

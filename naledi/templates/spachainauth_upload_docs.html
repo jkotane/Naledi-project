@@ -1,45 +1,75 @@
 {% extends "naledibase.html" %}
 
-{% block title %}Document Uploads{% endblock %}
+{% block title %}Upload Your Documents{% endblock %}
 
 {% block content %}
-<section style="background-color: #f9f9f9;">
-    <div class="container py-4">
-        <h3>Document Upload Form</h3>
-        <form method="POST" enctype="multipart/form-data" action="{{ url_for('spachainauth.spachainauth_upload_docs') }}">
-            <!-- ID, Passport, Visa -->
-            <div class="form-group">
-                <label for="id_passport_visa">ID/Passport/Visa</label>
-                <input type="file" class="form-control" id="id_passport_visa" name="id_passport_visa" accept="image/*,.pdf" required>
+<section class="bg-light py-5">
+    <div class="container">
+        <div class="card shadow-lg">
+            <div class="card-header bg-primary text-white text-center">
+                <h3><i class="fa fa-upload"></i> Upload Your Documents</h3>
+                <p class="mb-0">Ensure all files are in PDF or image format.</p>
             </div>
 
-            <!-- CIPC (Company Registration) -->
-            <div class="form-group">
-                <label for="cipc">CIPC (Company Registration)</label>
-                <input type="file" class="form-control" id="cipc" name="cipc" accept="image/*,.pdf" required>
-            </div>
+            <div class="card-body">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        <strong>{{ message }}</strong>
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+                {% endwith %}
 
-            <!-- SARS (Tax Clearance) -->
-            <div class="form-group">
-                <label for="sars">SARS (Tax Clearance)</label>
-                <input type="file" class="form-control" id="sars" name="sars" accept="image/*,.pdf" required>
-            </div>
+                <form method="POST" enctype="multipart/form-data">
+                    
+                    <div class="row">
+                        <!-- Left Column -->
+                        <div class="col-md-6">
+                            {% for field_name, doc_type in missing_docs.items() %}
+                            <div class="form-group">
+                                <label for="{{ field_name }}" class="text-info">
+                                    <i class="fa fa-upload"></i> {{ doc_type }} 
+                                </label>
+                                <input type="file" class="form-control" id="{{ field_name }}" name="{{ field_name }}" accept="image/*,.pdf">
+                            </div>
+                            {% endfor %}
+                        </div>
 
-            <!-- Permit -->
-            <div class="form-group">
-                <label for="permit">Permit</label>
-                <input type="file" class="form-control" id="permit" name="permit" accept="image/*,.pdf" required>
-            </div>
+                        <!-- Right Column -->
+                        <div class="col-md-6">
+                            {% for doc_type, doc in existing_docs.items() %}
+                            <div class="form-group">
+                                <label class="text-success">
+                                    <i class="fa fa-check-circle"></i> {{ doc_type }} (Uploaded)
+                                </label>
+                                <p>
+                                    <a href="{{ doc.file_url }}" target="_blank" class="btn btn-success btn-sm">
+                                        <i class="fa fa-eye"></i> View
+                                    </a>
+                                </p>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
 
-            <!-- Building Plans -->
-            <div class="form-group">
-                <label for="building_plans">Building Plans</label>
-                <input type="file" class="form-control" id="building_plans" name="building_plans" accept="image/*,.pdf" required>
-            </div>
+                    <!-- Submit Button -->
+                    <div class="text-center mt-4">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fa fa-cloud-upload"></i> Upload Documents
+                        </button>
+                    </div>
+                </form>
 
-            <!-- Submit Button -->
-            <button type="submit" class="btn btn-primary">Upload Documents</button>
-        </form>
+                <div class="text-center mt-4">
+                    <a href="{{ url_for('spachainauth.spachainauth_view_docs') }}" class="btn btn-secondary">
+                        <i class="fa fa-list"></i> View All Documents
+                    </a>
+                </div>
+            </div>
+        </div>
     </div>
 </section>
 {% endblock %}
