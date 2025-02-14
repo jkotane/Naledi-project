@@ -22,11 +22,6 @@ load_dotenv(dotenv_path=dotenv_path, verbose=True)
 
 
 db_uri = os.getenv("SQLALCHEMY_DATABASE_URI") or os.getenv("DATABASE_URL")
-print("✅ Database URI: ", db_uri)
-# Debugging Print
-print("✅ Starting Flask Application...")
-
-
 try:
     print("trying to create flask app")
     app = create_app()  # Explicitly call the function

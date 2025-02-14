@@ -16,6 +16,7 @@ load_dotenv()
 login_manager = LoginManager()
 oauth = OAuth()"""
 
+
 # Define the user_loader function
 @login_manager.user_loader
 def load_user(user_id):
@@ -40,16 +41,20 @@ def create_app():
     migrate.init_app(app, db)  # Initialize Migrate here
 
     # Register OAuth Providers
-    oauth.register(
-        name="google",
-        client_id=os.getenv("GOOGLE_CLIENT_ID"),
-        client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-        access_token_url="https://oauth2.googleapis.com/token",
-        authorize_url="https://accounts.google.com/o/oauth2/auth",
-        api_base_url="https://www.googleapis.com/oauth2/v1/",
-        userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
-        client_kwargs={"scope": "openid email profile"},
-    )
+    google = oauth.register(
+            name="google",
+            client_id=os.getenv("GOOGLE_CLIENT_ID"),
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            access_token_url="https://oauth2.googleapis.com/token",
+            #access_token_url="https://accounts.google.com/o/oauth2/token",
+            authorize_url="https://accounts.google.com/o/oauth2/auth",
+            api_base_url="https://www.googleapis.com/oauth2/v1/",
+            userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
+            client_kwargs={"scope": "openid email profile"},
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration"  # ✅ Explicitly add metadata URL
+        )
+
+
 
     # Import routes for this blueprint (after blueprint declaration)
     from . import routes  # Import routes after blueprint definition

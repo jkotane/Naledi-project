@@ -1,0 +1,7 @@
+name: organizations/692405534032/policies/iam.allowedPolicyMemberDomains
+spec:
+  rules:
+  - values:
+      allowedValues:
+      - C00q0d0bl
+      - gmail.com

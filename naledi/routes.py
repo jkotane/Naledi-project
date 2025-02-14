@@ -6,15 +6,46 @@ from naledi.naledimodels import UserProfile, User, StoreDetails, SpazaOwner
 from .utils import is_valid_email, is_valid_cellno, is_valid_password # Import from utils.py
 from naledi import oauth
 from naledi import db
+from google.oauth2 import id_token
+#from google.auth.transport import requests
+import requests
+import os
+import jwt
+from jwt.exceptions import InvalidTokenError
+
+
+
 
 
 #naledi_bp = Blueprint('naledi_bp', __name__)
 
 
-
-
 google = oauth.create_client('google')  # create the google oauth client
 login_manager = LoginManager()  # Create a login manager instance
+
+
+# Function to verify Google token
+def verify_google_token(id_token):
+    try:
+        # Decode token WITHOUT verifying the signature (for debugging)
+        decoded_token = jwt.decode(id_token, options={"verify_signature": False})
+        print("Decoded Google ID Token:", decoded_token)
+
+        # Ensure the 'iss' (issuer) claim is valid
+        if decoded_token.get("iss") not in ["https://accounts.google.com", "accounts.google.com"]:
+            raise ValueError(f"Invalid issuer: {decoded_token.get('iss')}")
+
+        return decoded_token
+    except InvalidTokenError:
+        print("Invalid token received from Google.")
+        return None
+    except Exception as e:
+        print(f"Token verification error: {e}")
+        return None
+
+
+
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -149,6 +180,7 @@ def naledi_home():
 
     return render_template("naledi_home.html", user=current_user, store=store)
 
+#print("🔹 The Config file Redirect URI:", os.getenv("GOOGLE_REDIRECT_URI"))
 
 
 @naledi_bp.route('/services')
@@ -160,6 +192,7 @@ def naledi_services():
 @naledi_bp.route('/auth/google')
 def google_auth():
     redirect_uri = url_for('naledi.google_callback', _external=True)
+    #print("Google Redirect URI:", redirect_uri)
     return google.authorize_redirect(redirect_uri)
 
 # Callback route for Google OAuth
@@ -167,42 +200,59 @@ def google_auth():
 def google_callback():
     try:
         # Fetch token and user info from Google
+        #print("Google Callback route reached.")
+        #print("Trying to inspect the token")
         token = google.authorize_access_token()
+       # print("Raw Google Token:", token)
+        id_token = token['id_token']
+
+        if not token:
+           raise ValueError("No token received from Google.")
+
+        if 'id_token' not in token:
+           raise ValueError(f"Missing ID token. Full response: {token}")
+
+        # Verify Google ID Token before proceeding
+        verified_token = verify_google_token(id_token)
+        if not verified_token:
+            flash("Invalid Google authentication token.", category="error")
+            return redirect(url_for("naledi.naledi_login"))
+
+
         user_info = google.get('userinfo').json()
-        print("Google Token:", token)
-        print("Google User Info:", user_info)
+       
+       # print("Google User Info:", user_info)
 
         email = user_info.get('email')
         name = user_info.get('name')
 
         # Check if the user exists
-        user = UserProfile.query.filter_by(email=email).first()
+        existing_user = UserProfile.query.filter_by(email=email).first()
+        if existing_user:
+           login_user(existing_user)
+           flash("Logged in successfully!", category="success")
+           return redirect(url_for('naledi.naledi_home'))
 
-        if not user:
+        else:
             # Create a new user if they don’t exist
-            new_user = UserProfile(
+              new_user = UserProfile(
                 username=name,
                 email=email,
-                cellno='N/A',  # Default value for Google users
+                cellno='000-000-000',  # Default value for Google users
                 user_password='N/A',  # Default value for Google users
-                is_social_login_user=True,
-                 user_type='spaza_user')   # since this for spaza owner the default user type is spaza_user
-            
-            db.session.add(new_user)
-            db.session.commit()
-            login_user(new_user)
-            flash('login with Google successful!', category='success')
-            return redirect(url_for('naledi.naledi_home'))
-        else:
-            flash('Logged in successfully!', category='success')
-
-        # Log the user in
-        login_user(user)
-        return redirect(url_for('naledi.naledi_home'))  # Redirect to home page
+                is_social_login_user=True
+                 )
+              db.session.add(new_user)
+              db.session.commit()
+              login_user(new_user)
+              flash('login with Google successful!', category='success')
+        return redirect(url_for('naledi.naledi_home'))
+        
     except Exception as e:
         print(f"Error during Google callback: {e}")
         flash('An error occurred during Google authentication.', category='error')
         return redirect(url_for('naledi.naledi_login'))
+
 
 # Standard sign-up process for users without Google OAuth
 @naledi_bp.route('/naledi_sign_up', methods=['GET', 'POST'])
