@@ -22,6 +22,10 @@ jobs:
           workload_identity_provider: "projects/891653303521/locations/global/workloadIdentityPools/github-actions-pool/providers/github-provider"
           service_account: "github-actions-deployer@spazachain.iam.gserviceaccount.com"
 
+
+      - name: Configure Docker Authentication
+        run: gcloud auth configure-docker gcr.io 
+      
       - name: Configure Docker for Google Artifact Registry
         run: gcloud auth configure-docker gcr.io
 
