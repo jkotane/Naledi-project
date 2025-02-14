@@ -24,10 +24,14 @@ jobs:
        
 
 
-      - name: Configure Docker for Google Artifact Registry
-        run: 
-            gcloud auth configure-docker gcr.io  
-            gcloud auth configure-docker us-docker.pkg.dev  
+      - name: Configure Docker Authentication
+        run: |
+            gcloud auth configure-docker gcr.io
+            gcloud auth configure-docker us-docker.pkg.dev
+      
+      - name: Debug Authentication Variables
+        run: env | grep GOOGLE
+          
   
       - name: Build & Push Docker Image
         run: |
