@@ -25,9 +25,8 @@ jobs:
 
 
       - name: Configure Docker Authentication
-        run: |
-            gcloud auth configure-docker gcr.io
-            gcloud auth configure-docker us-docker.pkg.dev
+        run: gcloud auth configure-docker gcr.io
+        
       
       - name: Debug Authentication Variables
         run: env | grep GOOGLE
