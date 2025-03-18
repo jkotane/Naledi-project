@@ -25,15 +25,20 @@ db_uri = os.getenv("SQLALCHEMY_DATABASE_URI") or os.getenv("DATABASE_URL")
 try:
     print("trying to create flask app")
     app = create_app()  # Explicitly call the function
+    from main import app
+   # print(app.url_map)       # to be removed after debuging
+
     print("✅ Flask Application Created Successfully")
 except Exception as e:
     print("❌ ERROR: App creation failed:", e)
     sys.exit(1)  # Exit with error
 
+
 if __name__ == "__main__":
     try:
-        print("✅ Running Flask App on port 5000")
-        app.run(debug=True, port=5000)
+        port = int(os.getenv("PORT", 5001))  # Use PORT from Cloud Run (default to 8080)
+        print(f"✅ Running Flask App on port {port}")
+        app.run(host="localhost", port=5001, debug=True)  # Force it to use the correct port
     except Exception as e:
         print("❌ ERROR: Flask App failed to run:", e)
 

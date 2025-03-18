@@ -1,25 +1,34 @@
 # Use a lightweight Python image
 FROM python:3.11-slim
 
-# Set working directory inside the container
+# Set the working directory inside the container
 WORKDIR /app
 
-# Copy only requirements first (leveraging Docker caching)
+# Copy dependencies first (for caching)
 COPY requirements.txt .
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Install dependencies including PyJWT
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+# Copy the entire application
 COPY . .
 
-# Expose the Flask port
-EXPOSE 5000
+# Copy .env file into the container
+COPY .env /app/.env
+
+
+# Expose the correct Cloud Run port
+EXPOSE 8080
 
 # Set environment variables
 ENV FLASK_APP=main.py
 ENV FLASK_RUN_HOST=0.0.0.0
-ENV FLASK_ENV=development
+ENV FLASK_ENV=production
+ENV PORT=8080  
 
-# Run the Flask application
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
+# Ensure Gunicorn is installed (if missing)
+RUN pip install gunicorn
+
+# Run the Flask app using Gunicorn
+CMD ["gunicorn", "-b", "0.0.0.0:8080", "--timeout", "0", "main:app"]

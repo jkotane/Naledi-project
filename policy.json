@@ -1,16 +1,10 @@
 {
-  "name": "organizations/692405534032/policies/iam.allowedPolicyMemberDomains",
-  "spec": {
-    "rules": [
-      {
-        "values": {
-          "allowedValues": [
-            "C00q0d0bl"  # Google Workspace Customer ID for afrinnovae.com
-          ]
-        }
-      }
-    ]
-  }
+  "bindings": [
+    {
+      "role": "roles/iam.workloadIdentityUser",
+      "members": [
+        "principalSet://iam.googleapis.com/projects/891653303521/locations/global/workforcePools/afrinnovae-pool/attribute.email/admin@afrinnovae.com"
+      ]
+    }
+  ]
 }
-
-

@@ -3,5 +3,4 @@ spec:
   rules:
   - values:
       allowedValues:
-      - C00q0d0bl
-      - gmail.com
+      - "C00q0d0bl"  # Replace with your actual allowed domain

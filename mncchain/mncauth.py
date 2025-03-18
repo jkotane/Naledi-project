@@ -1,488 +1,374 @@
-import re
+from mncchain import mncauth
 from flask import Blueprint, render_template, request, flash, redirect, url_for, session, current_app
-from flask_login import login_user, logout_user, login_required, current_user
-from werkzeug.security import generate_password_hash, check_password_hash
-from naledi.naledimodels import UserProfile, SpazaOwner, StoreDetails, RegistrationForm, RegistrationProgress, Lesee, FoodItems,HealthCompliance
-from datetime import datetime
-from naledi  import oauth
-from naledi import db
+from flask_login import login_required, current_user, LoginManager, logout_user,login_user
+from naledi.naledimodels import db, MncUser, UserProfile, Municipal, MncDepartment
+from naledi.utils import set_password, check_password, verify_reset_token,exchange_id_token_for_access_token
+#from admin_utils import send_registration_email  # Import email function
+from flask_mailman import EmailMessage 
+from functools import wraps
+from naledi import azure,official_login_manager
+from itsdangerous import SignatureExpired, BadSignature
+import smtplib
+import re
+import jwt, requests
+from werkzeug.security import check_password_hash
+  
+# This blueprint is dedicated to user manangement for azure routes ( admin and offical users)
 
 
-mncauth  = Blueprint('mncauth', __name__)
-
-google = oauth.google
-
-# Validation helper function for email 
-def is_valid_email(email):
-    """Validate email format."""
-    regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
-    return re.match(regex, email)
+mncauth = Blueprint('mncauth', __name__,url_prefix='/mncauth',template_folder='templates')  # ✅ Explicitly set template folder)
 
 
-# validation helper function for cell nunber 
-def is_valid_cellno(cellno):
-    """Validate South African cell number format."""
-    regex = r'^(0|\+27)[6-8][0-9]{8}$'
-    return re.match(regex, cellno)
+# user loader define for the official user
+"""@official_login_manager.user_loader
+def load_official(user_id):
+    
+    print(f"🔹 Loading official User: {user_id}")
 
-# validation helper function for password
-
-def is_valid_password(password):
-    """
-    Validate password format.
-    Must include:
-    - At least 8 characters
-    - At least one uppercase letter
-    - At least one lowercase letter
-    - At least one digit
-    - At least one special character
-    """
-    regex = r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#])[A-Za-z\d@$!%*?&#]{8,}$'
-    return re.match(regex, password)
+    # debug statement
+    if not user_id:
+        print("❌ `user_id` is None! This means Flask-Login did not pass a valid ID.")
+        return None
+    
+    try:
+        user_id = int(user_id)  # Ensure it's an integer
+    except ValueError:
+        print(f"❌ Invalid user_id format: {user_id}")
+        return None
+"""
 
 
-# Validation helper function for email 
-@mncauth.route('/mnclogin', methods=['GET', 'POST'])
-def login():
+@official_login_manager.user_loader
+def load_official(user_id):
+    """Loads an offcial  user from the database using Flask-Login."""
+    print(f"🔹 Loading official User: {user_id}")
+
+    # Query using mnc_user_id instead of default id
+    user = MncUser.query.get(int(user_id))  # ✅ Use `id` instead of `mnc_user_id`
+
+    print(f"🔹 User: {user}" )
+    #print(f"🔹 is this an official ? : {user.is_official}" )
+
+
+    if user and user.is_official:
+        print(f"✅ official User Loaded: {user.mncfname} {user.mnclname}")
+        return user
+
+    print(f"🚨 User {user_id} is not an admin or does not exist!")
+    return None  # Return None if not an admin
+
+
+# ✅ Ensure only authenticated Offcials can access routes
+def official_required(f):
+    """Ensure the user is an authenticated admin."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        print(f"🔹 Checking admin access for user: {current_user}")
+
+        print(f"🔹 User is authenticated: {current_user.is_authenticated}")
+
+        if not current_user.is_authenticated:
+            print("❌ User is NOT authenticated. Redirecting to login.")
+            flash("Please log in first.", "warning")
+            return redirect(url_for('mncauth.official_login'))
+
+        if not isinstance(current_user, MncUser):
+            print("❌ User is not an instance of MncUser.")
+            flash("Unauthorized access.", "error")
+            return redirect(url_for('mncauth.official_login'))
+
+        if not current_user.is_official:
+            print("❌ User is not an official.")
+            flash("You do not have offcial  privileges.", "error")
+            return redirect(url_for('mncauth.official_login'))
+
+        print("✅ offcial  check passed.")
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+
+# Offcial  home route
+@mncauth.route('/home')
+#@login_required
+#@official_required
+def official_home():
+    """Ensure only admins access this, and clear session if switching user types."""
+    print(f"🏠 Reached offcial home. Current user: {current_user}")
+
     if current_user.is_authenticated:
-        # Redirect to home if already logged in
-        return redirect(url_for('mncview.mnchome'))
+        print(f"🔍 Current User Type Before Redirect: {type(current_user)}")
 
+        # If the logged-in user is NOT an instance of MncUser, they are from store login
+        if not isinstance(current_user, MncUser) or not current_user.is_official:
+            print("🚨 User is not an official! Logging out and forcing official login.")
+            
+            logout_user()  # ✅ Clear current user
+            session.clear()  # ✅ Force Flask-Login to reset user session
+
+            flash("You need to log in as verified municipal official.", "warning")
+            return redirect(url_for("mncauth.official_login"))  # Redirect to admin login
+
+        # ✅ If already an offcial , proceed to the dashboard
+        print("🚀 Redirecting official to dashboard.")
+        #return redirect(url_for("mncview.official_dashboard"))
+        #return redirect(url_for('mncview.official_store_dashboard'))
+        return redirect(url_for('mncview.official_view_home'))
+
+    print("🔒 Redirecting user to admin login.")
+    return redirect(url_for("mncauth.official_login"))
+    
+
+
+# load the admin_manager and load_user for the admin user
+# ✅ Admin Login
+@mncauth.route('/login', methods=['GET', 'POST'])
+def official_login():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
 
-        # Check if email is provided
         if not email:
-            flash('Email is required.', category='error')
-            return render_template("mnclogin.html", user=current_user)
+            flash("Please enter your registered email.", "error")
+            return redirect(url_for('mncauth.official_login'))
 
-        # Fetch user by email
-        user = UserProfile.query.filter_by(email=email).first()
+        # Fetch official from database
+        official = MncUser.query.filter_by(mncemail=email).first()
 
-        if user:
-            # Check if the user is a Google user
-            if user.is_social_login_user:
-                flash(
-                    'This account uses Google Sign-In. Please use the "Sign in with Google" button.',
-                    category='info')
-                return render_template(
-                    "mnclogin.html", user=current_user, is_social_login_user=True, google_login_url=url_for('mncauth.google_auth'))
+        if not official:
+            flash("This email is not registered as an official.", "error")
+            return redirect(url_for('mncauth.official_login'))
 
-            # Validate password for standard users
-            if check_password_hash(user.user_password, password):
-                login_user(user, remember=True)
-                flash('Logged in successfully!', category='success')
-                return redirect(url_for('mncview.home'))
-            else:
-                flash('Invalid password. Please try again.', category='error')
-        else:
-            flash('No account found with this email.', category='error')
-            return redirect(url_for('mncauth.sign_up'))
+        # Ensure the official is verified
+        if not official.is_verified:
+            flash("Your account is not verified. Please check your email.", "warning")
+            return redirect(url_for('mncauth.official_login'))
 
-    # Add the Google login URL for GET requests or after errors
-    google_login_url = url_for('mncauth.google_auth', _external=True)
+        # OPTION 1: Use Azure AD if it's an enterprise email
+        if email.endswith('.gov.za') or email.endswith('.org'):
+            session['admin_email'] = email
+            return redirect(url_for('mncauth.official_azure_login'))
 
-    # Render the login form
-    return render_template(
-        "mnclogin.html", user=current_user, is_social_login_user=False, google_login_url=google_login_url )
-     
+        # OPTION 2: Use normal email/password login for non-enterprise emails
+        if not password:
+            flash("Please enter your password.", "error")
+            return redirect(url_for('mncauth.official_login'))
 
-# Unified login/sign-up route
-@mncauth.route('/auth/google')
-def google_auth():
-    redirect_uri = url_for('mnc.google_callback', _external=True)
-    return google.authorize_redirect(redirect_uri)
+        # Validate password
+        if not check_password_hash(official.password_hash, password):
+            flash("Invalid credentials. Please try again.", "error")
+            return redirect(url_for('mncauth.official_login'))
 
-# Callback route for Google OAuth
-@mncauth.route('/auth/google/callback')
-def google_callback():
-    try:
-        # Fetch token and user info from Google
-        token = google.authorize_access_token()
-        user_info = google.get('userinfo').json()
-        print("Google Token:", token)
-        print("Google User Info:", user_info)
+        # Log in the official
+        login_user(official)
+        flash("Login successful!", "success")
 
-        email = user_info.get('email')
-        name = user_info.get('name')
+        # Redirect to official home/dashboard
+        return redirect(url_for('mncview.official_store_dashboard'))
 
-        # Check if the user exists
-        user = UserProfile.query.filter_by(email=email).first()
+    return render_template('official_login.html')
 
-        if not user:
-            # Create a new user if they don’t exist
-            new_user = UserProfile(
-                username=name,
-                email=email,
-                cellno='N/A',  # Default value for Google users
-                user_password='N/A',  # Default value for Google users
-                is_social_login_user=True
-            )
-            db.session.add(new_user)
-            db.session.commit()
-            login_user(new_user)
-            flash('login with Google successful!', category='success')
-            return redirect(url_for('spachainview.home'))
-        else:
-            flash('Logged in successfully!', category='success')
-
-        # Log the user in
-        login_user(user)
-        return redirect(url_for('spachainview.home'))  # Redirect to home page
-    except Exception as e:
-        print(f"Error during Google callback: {e}")
-        flash('An error occurred during Google authentication.', category='error')
-        return redirect(url_for('spachainauth.login'))
-
-
-#standard logout route
+# ✅ Admin Logout
 @mncauth.route('/logout')
 @login_required
-def logout():
+def official_logout():
     logout_user()
-    flash('Logged out successfully.', category='success')
-    return redirect(url_for('spachainauth.login'))
+    flash('Logged out successfully.', 'success')
+    return redirect(url_for('mncauth.official_login'))
+
+# ✅ Azure AD Login for Admins
+@mncauth.route('/azure/login')
+def official_azure_login():
+    """Redirect to Azure AD for authentication."""
+    print("🔹 Reached Azure official Login Route")
+
+    # Construct the correct redirect URI
+    redirect_uri = request.host_url.rstrip('/') + url_for('mncauth.official_azure_callback', _external=False)
+    redirect_uri = redirect_uri.replace("127.0.0.1", "localhost")
+    print("Azure Redirect URI:", redirect_uri)
+
+    # Generate and store the state securely in Flask session
+    auth_url_data = azure.create_authorization_url(redirect_uri)
+    state = auth_url_data.get('state')
+
+    if not state:
+        print("⚠️ Warning: OAuth state was not generated correctly!")
+        flash('An error occurred during authentication. Please try again.', 'error')
+        return redirect(url_for('mncauth.official_login'))  # Redirect to login page
+
+    # ✅ Store state in session before redirecting
+    session['oauth_state'] = state
+    session.modified = True  # Ensure session is saved
+    print(f"✅ Stored OAuth State: {session['oauth_state']}")
+
+    # Redirect to Azure AD for authentication
+    return azure.authorize_redirect(redirect_uri, state=state)
+
+# ✅ Azure AD Callback
 
 
-# Standard sign-up process for users without Google OAuth
-@mncauth.route('/sign_up', methods=['GET', 'POST'])
-def sign_up():
-    if request.method == 'POST':
-        first_name = request.form.get('firstName')
-        email = request.form.get('email')
-        cellno = request.form.get('cellno')
-        password1 = request.form.get('password1')
-        password2 = request.form.get('password2')
+@mncauth.route('/azure/callback')
+def official_azure_callback():
+    """Handle Azure AD Official callback."""
+    print("🔹 Reached Azure official AD Callback")
 
-            # Log input valuesç
-        print(f"Sign-up form submitted: {first_name}, {email}, {cellno}")
+    try:
+        expected_state = session.pop('oauth_state', None)
+        received_state = request.args.get('state')
 
-        # Check if the username, email, or cell number already exists
-        user = UserProfile.query.filter(
-            (UserProfile.username == first_name) |
-            (UserProfile.email == email) |
-            (UserProfile.cellno == cellno)
-        ).first()
+        print(f"✅ Expected State: {expected_state}, Received State: {received_state}")
 
-        if user:
-            print("Validation: User already exists.")
-            flash('Username, email, or cell number already exists.', category='error')
-            return redirect(url_for('spachainauth.sign_up'))
-        elif not is_valid_email(email):
-            flash('Invalid email format.', category='error')
-            return redirect(url_for('spachainauth.sign_up'))
-        elif not is_valid_cellno(cellno):
-            flash('Provide only a valid South African cell number.', category='error')
-            return redirect(url_for('spachainauth.sign_up'))
-        elif password1 != password2:
-            flash('Passwords don\'t match.', category='error')
-            return redirect(url_for('spachainauth.sign_up'))
-        elif not is_valid_password(password1):
-            flash('Password must include at least 8 characters, one uppercase letter, one lowercase letter, one digit, and one special character.', category='error') 
-            return redirect(url_for('spachainauth.sign_up'))   
-        else:
-            # create a new user taking into account the social lig
-            new_user = UserProfile(
-            username=first_name,
-                email=email,
-                cellno=cellno,
-                user_password=generate_password_hash(password1, method='pbkdf2:sha256'),
-                is_social_login_user=False  # Explicitly set this to False
-            )
+        if not expected_state or expected_state != received_state:
+            print("🚨 CSRF Warning! State does not match.")
+            flash('Security error: Invalid state. Please try again.', 'error')
+            return redirect(url_for('mncauth.official_login'))
 
-            print(f"New user object: {new_user}")
+        token = azure.authorize_access_token()
+        if not token:
+            print("⚠️ Failed to fetch token from Azure AD.")
+            flash('Failed to fetch token from Azure AD. Please try again.', 'error')
+            return redirect(url_for('mncauth.official_login'))
 
+        print(f"🔐 Azure Token Response: {token}")  # Optional: Debug log
+
+        # ✅ Store Azure ID token in session for GCP access later
+         #✅ Store Azure ID token in session for GCP access later
+        id_token = token.get('id_token')
+        if id_token:
+            session['azure_id_token'] = id_token
+            print("✅ Azure ID token stored in session.")
+
+            # 🆕 Exchange for Google access token now and store it
             try:
-                db.session.add(new_user)
-                db.session.commit()
-                print("User added successfully.")
-                flash('Account created successfully!', category='success')
-                return redirect(url_for('spachainview.spusers', user_id=new_user.id))
+                google_access_token = exchange_id_token_for_access_token(id_token)
+                session['google_access_token'] = google_access_token
+                print("✅ Google access token stored in session.")
             except Exception as e:
-                 db.session.rollback()
-                 print(f"Database error: {e}")
-                 flash('An error occurred while creating your account.', category='error')
-                 return redirect(url_for('spachainauth.sign_up'))
-            
-    # pass the google login url to the sign up page       
-    google_login_url = url_for('spachainauth.google_sign_up', _external=True)  
-    #return redirect(url_for('spachainview.home',google_login_url=google_login_url ))     
-    return redirect(url_for('spachainview.home',google_login_url=google_login_url ))
+                print(f"❌ Token exchange failed during callback: {e}")
+                flash('Authentication error during token exchange.', 'error')
+                return redirect(url_for('mncauth.official_login'))
+
+        else:
+            print("❌ No ID token received from Azure!")
+            flash('Authentication error: No ID token received.', 'error')
+            return redirect(url_for('mncauth.official_login'))
 
 
-# tracking the registratin progress 
+        # Fetch user info using access_token
+        headers = {"Authorization": f"Bearer {token['access_token']}"}
+        user_info = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers).json()
+        print("🔹 Azure AD User Info:", user_info)
 
-@mncauth.route('/store-details/<int:owner_id>', methods=['GET', 'POST'])
-@login_required
-def store_details(owner_id):
-    owner = SpazaOwner.query.get(owner_id)
-    if not owner:
-        flash('Owner details not found. Please complete owner details first.', category='error')
-        return redirect(url_for('spachainauth.owner_details', user_id=current_user.id))
+        email = user_info.get('mail') or user_info.get('userPrincipalName')
 
-    if request.method == 'POST':
-        store_name = request.form.get('store_name')
-        location = request.form.get('location')
-        address = request.form.get('address')
+        if not email:
+            print("❌ Azure authentication failed: No email received.")
+            flash('Azure authentication failed: No email received.', 'error')
+            return redirect(url_for('mncauth.official_login'))
 
-        # Add store details
-        new_store = StoreDetails(
-            owner_id=owner.id,
-            store_name=store_name,
-            location=location,
-            address=address
-        )
-        db.session.add(new_store)
-        db.session.commit()
-        flash('Store details saved successfully!', category='success')
-        return redirect(url_for('spachainview.home'))
-
-    return render_template("store_details.html", owner=owner)
-
-
-
-
-@mncauth.route('/home', methods=['GET', 'POST'])
-@login_required
-def home():
-    # Check if the user has a profile or services to display
-    user_profile = UserProfile.query.get(current_user.id)
-    
-    if not user_profile:
-        # If no profile exists, redirect to registration or an appropriate page
-        flash("Please complete your profile to access services.", category="warning")
-        return redirect(url_for('spachainauth.register'))
-
-    # If the user has a profile, display their services or profile
-    return render_template("services.html", user=user_profile)
-
-
-# done for showing customer profile of an authenticated user
-@mncauth.route('/profile', methods=['GET', 'POST'])
-@login_required
-def profile():
-    # Check if the user has a profile or services to display
-    user_profile = UserProfile.query.get(current_user.id)
-    print(f"User profile is : {user_profile}")
-    
-    if not user_profile:
-        # If no profile exists, redirect to registration or an appropriate page
-        flash("Please complete your profile to access services.", category="warning")
-        return redirect(url_for('spachainauth.sign_up'))
-
-    # If the user has a profile, display their services or profile
-    #return render_template("sign_up.html", user=user_profile)
-    return render_template("profile.html", user=user_profile)
-
-
-# done for showing customer registration details
-@mncauth.route('/reg_detail', methods=['GET', 'POST'])
-@login_required
-def reg_detail():
-    # Check if the user has a profile or services to display
-     if current_user.is_authenticated:
-    
-         registration = RegistrationForm.query.filter_by(user_id=current_user.id).first()
-
-         current_user.registration_completed = bool(
-            registration and registration.status in ['submitted', 'completed']
-            )
-
-         #return render_template("reg_detail.html", registration = registration,user=current_user)
-         return render_template("reg_detail.html", registration=registration, user=current_user)
-
-    # If the user has a profile, display their services or profile
-     return render_template("home.html", user=current_user, registration=registration)
-
-# Route to capture food list items for the store 
-# the route to handle food items selected by the store owner
-@mncauth.route('/food_items', methods=['GET', 'POST'])
-@login_required
-def food_items():
-    if request.method == 'POST':
-        # Capture selected food items
-        selected_items = request.form.getlist('food_items')
-        other_item = request.form.get('food_other')
-
-        # Append "Other" item if specified
-        if 'Other' in selected_items and other_item:
-            selected_items.append(other_item)
-
-        # Save food items to the database
-        food_entry = FoodItems(
-            user_id=current_user.id,
-            selected_items=selected_items
-        )
-        try:
-            db.session.add(food_entry)
-            db.session.commit()
-            flash('Food items saved successfully!', category='success')
-            return redirect(url_for('spachainview.home',user=current_user))
-        except Exception as e:
-            db.session.rollback()
-            flash('An error occurred while saving your food items.', category='error')
-            print(f'Error: {e}')
-
-    return render_template('food_items.html',user=current_user)
-
-# The route for health compliance for the store owner
-@mncauth.route('/store_health', methods=['GET', 'POST'])
-@login_required
-def store_health():
-    user_id = current_user.id
-
-    print(f"Health Compliance User ID: {user_id}")
-
-    owner = SpazaOwner.query.filter_by(user_id=user_id).first()
-    if not owner:
-        flash('Owner details not found. Please complete owner details first.', category='error')
-        return redirect(url_for('spachainauth.owner_details', user_id=current_user.id))
-
-    print(f"health Owner ID: {owner.id}")
-    if request.method == 'POST':
-        # Capture form data
-        sanitary_facilities = request.form.getlist('sanitary_facilities')
-        cleaning_facilities = request.form.getlist('cleaning_facilities')
-        handwashing_stations = request.form.getlist('handwashing_stations')
-        waste_disposal = request.form.getlist('waste_disposal')
-        food_handling = request.form.getlist('food_handling')
-        food_storage = request.form.getlist('food_storage')
-        food_preparation = request.form.getlist('food_preparation')
-        food_prep_tools = request.form.getlist('food_prep_tools')
-        employees = {
-            "men": request.form.get('men-employed'),
-            "women": request.form.get('women-employed'),
-            "total": request.form.get('total-employed')
-        }
-    
-        fields_completed = { "sanitary_facilities": sanitary_facilities, "cleaning_facilities": cleaning_facilities,
-                            "handwashing_stations": handwashing_stations, "waste_disposal": waste_disposal,
-                            "food_handling": food_handling, "food_storage": food_storage,
-                            "food_preparation": food_preparation, "food_prep_tools": food_prep_tools, 
-                              "employees": employees}
+        if "#EXT#" in email:
+            match = re.search(r"(.+?)_([^#]+)#EXT#@", email)
+            if match:
+                email = match.group(1).replace("_", ".") + "@" + match.group(2)
         
-        print(f"Health Compliance data: {fields_completed}")
+        print(f"✅ Processed Email: {email}")
+
+        user = MncUser.query.filter_by(mncemail=email).first()
         
-    
-        # Create a new record in the HealthCompliance table
-        health_compliance = HealthCompliance(
-            user_id=current_user.id,
-            sanitary_facilities=sanitary_facilities,
-            cleaning_facilities=cleaning_facilities,
-            handwashing_stations=handwashing_stations,
-            waste_disposal=waste_disposal,
-            food_handling=food_handling,
-            food_storage=food_storage,
-            food_preparation=food_preparation,
-            food_prep_tools=food_prep_tools,
-            employees=employees
-        )
+        if user:
+            login_user(user)
+            session.modified = True
+            print(f"✅ O tsene lenyora: {email}")
+            flash('Logged in successfully as Admin!', 'success')
+            return redirect(url_for('mncview.official_dashboard'))  # You can use official_doc_dashboard too
+        else:
+            print(f"❌ Unauthorized access attempt: {email}")
+            flash('Unauthorized access. Contact the administrator.', 'error')
+            return redirect(url_for('mncauth.official_login'))
 
-        try:
-            db.session.add(health_compliance)
-            db.session.commit()
-            flash('Health compliance data saved successfully!', category='success')
-            return redirect(url_for('spachainview.home',user=current_user))
-        except Exception as e:
-            db.session.rollback()
-            flash('An error occurred while saving the data.', category='error')
-            print(f'Error: {e}')
-            return redirect(url_for('spachainview.health_compliance',owner=owner,user=current_user))
-
-    return render_template('store_health.html',user=current_user)
+    except Exception as e:
+        print(f"🚨 Error during Azure AD callback: {e}")
+        flash('An error occurred during Azure authentication.', 'error')
+        return redirect(url_for('mncauth.official_login'))
 
 
-@mncauth.route('/update_profile', methods=['GET', 'POST'])
-@login_required
-def update_profile():
+
+# ✅ Admin Password Reset
+@mncauth.route('/reset_password/<token>', methods=['GET', 'POST'])
+def official_reset_password(token):
+    """Handles password reset via secure token."""
+    user_id = verify_reset_token(token)  # ✅ Now using utils.py function
+
+    if not user_id:
+        flash("Invalid or expired reset token.", "error")
+        return redirect(url_for('mncauth.official_forgot_password'))
+
+    user = MncUser.query.get(user_id)
+
+    if not user:
+        flash("User not found.", "error")
+        return redirect(url_for('mncauth.official_forgot_password'))
+
     if request.method == 'POST':
-        name = request.form.get('name')
-        cellno = request.form.get('cellno')
-        address = request.form.get('address')
+        new_password = request.form.get('password')
+        token = request.form.get('token')  # ✅ Retrieve token from hidden field
 
-        # Validate inputs
-        if not is_valid_cellno(cellno):
-            flash('Invalid phone number.', category='error')
-            return redirect(url_for('spachainauth.update_profile'))
+        if not token:
+            flash("Missing reset token. Try again.", "error")
+            return redirect(url_for('mncauth.official_forgot_password'))
 
-        # Update the current user's profile
-        current_user.username = name
-        current_user.cellno = cellno
-        owner = SpazaOwner.query.filter_by(user_id=current_user.id).first()
-        if not owner:
-            owner = SpazaOwner(user_id=current_user.id)
-            db.session.add(owner)
-        owner.address = address
+        if not new_password or len(new_password) < 6:
+            flash("Password must be at least 6 characters long.", "error")
+            return redirect(url_for('mncauth.official_reset_password', token=token))
+
+        user.set_password(new_password)  # ✅ Uses MncUser method
         db.session.commit()
 
-        flash('Profile updated successfully!', category='success')
-        return redirect(url_for('spachainauth.profile'))
+        flash("Your password has been updated. You can now log in.", "success")
+        return redirect(url_for('mncauth.official_login'))
 
-    # Render update form for GET request
-    return render_template('update_profile.html', user=current_user)
-
-# done for showing customer compliance tracking progress
-@mncauth.route('/spusers', methods=['GET', 'POST'])
-@login_required
-def spusers():
-    # Check if the user has a profile or services to display
-    user_profile = UserProfile.query.get(current_user.id)
-    
-    if not user_profile:
-        # If no profile exists, redirect to registration or an appropriate page
-        flash("Please complete your profile to access services.", category="warning")
-        return redirect(url_for('spachainauth.sign_up'))
-
-    # If the user has a profile, display their services or profile
-    return render_template("sign_up.html", user=user_profile)
+    return render_template('official_reset_password.html', token=token)
 
 
-# to be done to include services to subscribe to like compliance tracking
-@mncauth.route('/services')
-def services():
-    #return render_template("services.html", user=current_user)
-    return render_template("services.html", user=current_user)
+
+@mncauth.route('/forgot_password', methods=['GET', 'POST'])
+def official_forgot_password():
+    """Allows officials to request a password reset."""
+    if request.method == 'POST':
+        email = request.form.get('email')
+
+        if not email:
+            flash('Please enter your email.', 'error')
+            return redirect(url_for('mncauth.official_forgot_password'))
+
+        user = MncUser.query.filter_by(mncemail=email).first()
+
+        if not user:
+            flash('No account found with this email.", "error')
+            return redirect(url_for('mncauth.official_forgot_password'))
+
+        # ✅ Generate reset token
+        reset_token = user.generate_reset_token()
+        reset_url = url_for('mncauth.official_reset_password', token=reset_token, _external=True)
+
+        # ✅ Create Email Message (Correct Flask-Mailman Syntax)
+        msg = EmailMessage(
+            subject="Password Reset Request",
+            body=f"Click the link below to reset your password:\n{reset_url}",
+            from_email=current_app.config['MAIL_DEFAULT_SENDER'],
+            to=[user.mncemail]  # Must be a list
+        )
+
+        # ✅ Send the email
+        msg.send()  # Flask-Mailman sends the email directly
+
+        flash("Password reset email sent. Check your inbox.", "success")
+        return redirect(url_for('mncauth.official_login'))
+
+    return render_template('official_forgot_password.html')
 
 
-# Route to displace compliance actions for the store owner
-@mncauth.route('/compliance_actions')
-@login_required
-def compliance_actions():
-    #return render_template("services.html", user=current_user)
-    return render_template("compliance_actions.html", user=current_user)
+@mncauth.route('/token-catch')
+def token_catch():
+    return "Token received! Check URL fragment in your browser URL bar."
 
-# Route to display  health compliance actions for the store owner
-"""@spachainauth.route('/compliance/store_health', methods=['GET', 'POST'])
-@login_required
-def store_health():
-    #return render_template("services.html", user=current_user)
-    return render_template("store_health.html", user=current_user)"""
-
-# Route to display  fire safety compliance actions for the store owner
-@mncauth.route('/compliance/store_fire', methods=['GET', 'POST'])
-@login_required
-def store_fire():
-    #return render_template("services.html", user=current_user)
-    return render_template("store_fire.html", user=current_user)
-
-# Route to display  zoning by laws alignment for the store 
-@mncauth.route('/compliance/store_zoning', methods=['GET', 'POST'])
-@login_required
-def store_zoning():
-    #return render_template("services.html", user=current_user)
-    return render_template("store_zoning.html", user=current_user)
-
-# Route to display  electrical compliance  by laws alignment for the store 
-@mncauth.route('/compliance/store_electrical', methods=['GET', 'POST'])
-@login_required
-def store_electrical():
-    #return render_template("services.html", user=current_user)
-    return render_template("store_electrical.html", user=current_user)
-
-# Route to display  building plans alignment  by laws alignment for the store 
-@mncauth.route('/compliance/store_building', methods=['GET', 'POST'])
-@login_required
-def store_building():
-    #return render_template("services.html", user=current_user)
-    return render_template("store_building.html", user=current_user)

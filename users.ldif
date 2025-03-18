@@ -1,0 +1,13 @@
+dn: uid=testuser,ou=Users,dc=my-domain,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+cn: Test User
+sn: User
+uid: testuser
+uidNumber: 1001
+gidNumber: 1001
+homeDirectory: /home/testuser
+loginShell: /bin/bash
+mail: kotanej@gmail.com
+userPassword: {SSHA}26WCXOsiJJPF8fhdDwCvLO4qh3CCZJCY

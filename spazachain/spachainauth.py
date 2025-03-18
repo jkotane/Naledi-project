@@ -11,6 +11,7 @@ from google.cloud import storage
 from naledi.utils import allowed_file, upload_to_gcs
 #from config import ALLOWED_EXTENSIONS as allowed_extensions
 from naledi.utils import is_valid_cellno, allowed_file, upload_to_gcs   
+from flask import jsonify, g, json
 
 
 
@@ -31,6 +32,60 @@ def load_user(user_id):
 
     print(f"user not not exist /  not found: {user_id}")    
     return None
+
+#define the context processor for spachainauth. This calculatea all the progres data and makes it available to all templates
+@spachainauth.context_processor
+def inject_progress():
+    if hasattr(g, 'user_id'):
+        progress = get_registration_progress(g.user_id)
+        return dict(progress=progress)
+    return dict(progress=None)
+
+# Define a before request hook to set the user id in the g object ( Flask's glaobalm context)
+
+@spachainauth.before_request
+def before_request():
+   if current_user.is_authenticated:
+       g.user_id = current_user.id
+   else:    
+       g.user_id = None
+        
+
+
+
+
+# define the function to get the registration status
+
+def get_registration_progress(user_id):
+    progress = {
+        "profile_complete": False,
+        "registration_complete": False,
+        "store_details_complete": False,
+        "documents_uploaded": False,
+    }
+
+    # Check if profile is complete
+    user_profile = UserProfile.query.filter_by(id=user_id).first()
+    if user_profile:
+        progress["profile_complete"] = True
+
+    # Check if registration form is submitted
+    reg_form = RegistrationForm.query.filter_by(user_id=user_id).first()
+    if reg_form:
+        progress["registration_complete"] = True
+
+    # Check if store details are submitted
+    store_details = StoreDetails.query.filter_by(owner_id=user_id).first()
+    if store_details:
+        progress["store_details_complete"] = True
+
+    # Check if documents are uploaded
+    documents = Document.query.filter_by(user_id=user_id).first()
+    if documents:
+        progress["documents_uploaded"] = True
+
+    return progress
+
 
 # For users with a user profile , they can now register their spaza shop
 # registration form for the main owner with a user profile  - excludes the spaza shop detaiils and the leasee details
@@ -193,13 +248,11 @@ def spachainauth_owner_details(user_id):
     return render_template("spachainauth_owner_details.html", user=user, owner=owner)
 
 
-
-
-
 # route for the owner to be able to regisyte the store details
 @spachainauth.route('/store', methods=['GET', 'POST'])
 @login_required
 def spachainauth_store():
+
     if request.method == 'POST':
         # Extract common store fields
         user_id = current_user.id
@@ -265,7 +318,7 @@ def spachainauth_store():
             flash('No owner details found. Please complete owner details first.', category='error')
             return redirect(url_for('spachainauth.spachainauth_owner_details', user_id=user_id))
 
-
+        progress = get_registration_progress(current_user.id)  # Fetch progress data ✅
         # Create store record
         try:
     
@@ -313,11 +366,10 @@ def spachainauth_store():
         except Exception as e:
             db.session.rollback()
             flash(f"Error saving lessee details: {str(e)}", category="error")
-            return redirect(url_for('spachainauth.spachainauth_store',user=current_user))
+            return redirect(url_for('spachainauth.spachainauth_store',user=current_user,progress=progress))
 
     # Handle non-POST requests
-    return render_template('spachainauth_store.html', title='Spaza Owner Registration')
-
+    return render_template('spachainauth_store.html', title='Spaza Owner Registration', user=current_user)
 
 # Route to capture food list items for the store 
 # the route to handle food items selected by the store owner
@@ -365,30 +417,59 @@ def spachainauth_health_self_check():
 
     print(f"health Owner ID: {owner.id}")
     if request.method == 'POST':
-        # Capture form data
-        sanitary_facilities = request.form.getlist('sanitary_facilities')
-        cleaning_facilities = request.form.getlist('cleaning_facilities')
-        handwashing_stations = request.form.getlist('handwashing_stations')
-        waste_disposal = request.form.getlist('waste_disposal')
-        food_handling = request.form.getlist('food_handling')
-        food_storage = request.form.getlist('food_storage')
-        food_preparation = request.form.getlist('food_preparation')
-        food_prep_tools = request.form.getlist('food_prep_tools')
+        # Capture form data and structure it with a status field
+        sanitary_facilities = {
+            "status": "compliant" if request.form.getlist('sanitary_facilities') else "pending",
+            "details": request.form.getlist('sanitary_facilities')
+        }
+        cleaning_facilities = {
+            "status": "compliant" if request.form.getlist('cleaning_facilities') else "pending",
+            "details": request.form.getlist('cleaning_facilities')
+        }
+        handwashing_stations = {
+            "status": "compliant" if request.form.getlist('handwashing_stations') else "pending",
+            "details": request.form.getlist('handwashing_stations')
+        }
+        waste_disposal = {
+            "status": "compliant" if request.form.getlist('waste_disposal') else "pending",
+            "details": request.form.getlist('waste_disposal')
+        }
+        food_handling = {
+            "status": "compliant" if request.form.getlist('food_handling') else "pending",
+            "details": request.form.getlist('food_handling')
+        }
+        food_storage = {
+            "status": "compliant" if request.form.getlist('food_storage') else "pending",
+            "details": request.form.getlist('food_storage')
+        }
+        food_preparation = {
+            "status": "compliant" if request.form.getlist('food_preparation') else "pending",
+            "details": request.form.getlist('food_preparation')
+        }
+        food_prep_tools = {
+            "status": "compliant" if request.form.getlist('food_prep_tools') else "pending",
+            "details": request.form.getlist('food_prep_tools')
+        }
         employees = {
             "men": request.form.get('men-employed'),
             "women": request.form.get('women-employed'),
             "total": request.form.get('total-employed')
         }
-    
-        fields_completed = { "sanitary_facilities": sanitary_facilities, "cleaning_facilities": cleaning_facilities,
-                            "handwashing_stations": handwashing_stations, "waste_disposal": waste_disposal,
-                            "food_handling": food_handling, "food_storage": food_storage,
-                            "food_preparation": food_preparation, "food_prep_tools": food_prep_tools, 
-                              "employees": employees}
-        
+
+        fields_completed = {
+            "sanitary_facilities": sanitary_facilities,
+            "cleaning_facilities": cleaning_facilities,
+            "handwashing_stations": handwashing_stations,
+            "waste_disposal": waste_disposal,
+            "food_handling": food_handling,
+            "food_storage": food_storage,
+            "food_preparation": food_preparation,
+            "food_prep_tools": food_prep_tools,
+            "employees": employees
+        }
+
         print(f"Health Compliance data: {fields_completed}")
-        
-    
+
         # Create a new record in the HealthCompliance table
         health_compliance = HealthCompliance(
             user_id=current_user.id,
@@ -407,15 +488,104 @@ def spachainauth_health_self_check():
             db.session.add(health_compliance)
             db.session.commit()
             flash('Health compliance data saved successfully!', category='success')
-            return redirect(url_for('naledi.naledi_home',user=current_user))
+            return redirect(url_for('naledi.naledi_home', user=current_user))
         except Exception as e:
             db.session.rollback()
             flash('An error occurred while saving the data.', category='error')
             print(f'Error: {e}')
-            return redirect(url_for('spachainauth.spachainauth_health_self_check',owner=owner,user=current_user))
+            return redirect(url_for('spachainauth.spachainauth_health_self_check', owner=owner, user=current_user))
 
-    return render_template('spachainauth_health_self_check.html',user=current_user)
+    return render_template('spachainauth_health_self_check.html', user=current_user)
 
+
+
+# route for home and profile routes for registered users
+
+"""@spachainauth.route('/home', methods=['GET', 'POST'])
+@login_required
+def spachainauth_home():
+    
+    return render_template("spachainauth_home.html", user=current_user) """
+
+# route to retun=rn the logged on user to the their dashboard
+@spachainauth.route('/home')
+@login_required
+def spachainauth_home():
+    
+    spaza_owner = SpazaOwner.query.filter_by(user_id=current_user.id).first()
+    
+    # Initialize store variable to None as a fallback
+    store = None
+    progress = get_registration_progress(current_user.id)  # Fetch progress data ✅
+
+    if spaza_owner:
+        
+        # Query for the store details
+        store = StoreDetails.query.filter_by(owner_id=spaza_owner.id).first()
+        
+        if store:
+            # Check for both registered and draft statuses
+            if store.reg_status == 'registered' or store.reg_status == 'draft': 
+                print("Store has been registered or is in draft status")
+                current_user.has_registered_store = True
+                if store.reg_status == 'registered':
+                    flash('You have already registered your store!', category='success')
+                else:
+                    flash('Your store is in draft status. Please complete the registration.', category='info')
+            else:
+                current_user.has_registered_store = False
+                flash('Your store registration is pending or in an unknown status.', category='warning')
+        else:
+            # If store is not found, handle this case too
+            current_user.has_registered_store = False
+            flash('No store registered!', category='warning')
+    else:
+        current_user.has_registered_store = False
+
+    return render_template("spachainauth_home.html", user=current_user, store=store, progress=progress)  # ✅ Pass progress
+
+@spachainauth.route('/registration_progress', methods=['GET', 'POST'])
+@login_required
+def spachainauth_registration_progress():
+    user_id = current_user.id
+
+    # Get the registration progress
+    progress = get_registration_progress(user_id)
+    print(f"Registration Progress: {progress}")
+
+    # Redirect if any step is incomplete
+    if not progress["profile_complete"]:
+        flash('No user profile found. Please complete your profile first.', category='error')
+        return redirect(url_for('naledi.naledi_sign_up'))
+    if not progress["registration_complete"]:
+        flash('No registration form found. Please complete registration form first.', category='error')
+        return redirect(url_for('spachainauth.spachainauth_register', user_id=user_id))
+    if not progress["store_details_complete"]:
+        flash('No store details found. Please complete store details first.', category='error')
+        return redirect(url_for('spachainauth.spachainauth_store', user_id=user_id))
+    if not progress["documents_uploaded"]:
+        flash('No documents found. Please upload documents first.', category='error')
+        return redirect(url_for('spachainauth.spachainauth_upload_docs', user_id=user_id))
+
+    # If all steps are complete, render the progress bar
+    return render_template('spachainauth_home.html',user=current_user ,progress=progress)
+
+
+
+# the profile route for a user already signed-up
+
+# Route to display  fire safety compliance actions for the store owner
+@spachainauth.route('/userprofile', methods=['GET', 'POST'])
+@login_required
+def spachainauth_userprofile():
+    #return render_template("services.html", user=current_user)
+    return render_template("spachainauth_userprofile.html", user=current_user)
+
+@spachainauth.route('/spusers', methods=['GET', 'POST'])
+@login_required
+def spachainauth_spusers():
+    #return render_template("services.html", user=current_user)
+    return render_template("spusers.html", user=current_user)
 
 @spachainauth.route('/update_profile', methods=['GET', 'POST'])
 @login_required
@@ -464,9 +634,9 @@ def spusers():
 
 # to be done to include services to subscribe to like compliance tracking
 @spachainauth.route('/services')
-def services():
+def spachainauth_services():
     #return render_template("services.html", user=current_user)
-    return render_template("services.html", user=current_user)
+    return render_template("spachainauth_services.html", user=current_user)
 
 
 # Route to displace compliance actions for the store owner
@@ -553,7 +723,10 @@ def spachainauth_upload_docs():
                         user_id=current_user.id,
                         document_type=document_type,
                         file_url=file_url,
-                        filename=filename
+                        filename=filename,
+                        submitted_status ="submitted", # mark as submitted
+                        reviewed_status ="pending", # Default
+                        approved_status="pending"   # Default
                     )
                     db.session.add(new_document)
 
@@ -618,6 +791,182 @@ def spachainauth_view_docs():
     return render_template('spachainauth_view_docs.html', existing_docs=existing_docs)
 
 
+
+@spachainauth.route('/doc_verify_status', methods=['GET'])
+@login_required
+def doc_verify_status():
+    """Fetches submitted and missing documents for the user."""
+    
+    document_types = {
+        'id_passport_visa': 'ID/Passport/Visa [Required for all owners]',
+        'proof_of_address': 'Proof of Address [ Utility Bill or Letter from Municipality]',
+        'permit': 'Permit [Municipal Trading Permit]',
+        'health_certificate': 'Certificate of Acceptability [ Issued by the Environmental Health Department of the municipality ]',
+        'zoning_certificate': 'Zoning certificate or Special Consent Approval [To be obtained from the Municipality]',
+        'building_plans': 'Building plans [Required for any building alterations or new buildings]',
+        'title_deed_or_lease_agreement': 'Title deed or Lease Agreement',
+        'banking_confirmation': 'Banking confirmation [ Proof of your South African Bank Account]',
+        'cipc': 'CIPC [ Company Registration Certificate]',
+        'sars': 'SARS Tax Clearance [ This can be obtained from SARS to show you don’t have outstanding taxes]',
+        'affidavit': 'Affidavit [Proof that you are not engaged in illegal trading of goods]'   
+    }
+
+    # Fetch existing documents for the current user
+    existing_docs = {doc.document_type for doc in Document.query.filter_by(user_id=current_user.id).all()}
+
+    # Determine missing documents
+    submitted_docs = {key: value for key, value in document_types.items() if key in existing_docs}
+    missing_docs = {key: value for key, value in document_types.items() if key not in existing_docs}
+
+    return jsonify({
+        "submitted_documents": submitted_docs,
+        "missing_documents": missing_docs
+    })
+
+
+# route to display the documents uploaded by the store owner
+@spachainauth.route('/view_docs', methods=['GET'])
+@login_required
+def spachainauth_ver_docs():
+    """Render the document view page with submitted and missing documents."""
+    
+    progress = doc_verify_status()  # Call the function to get documents
+
+    return render_template('spachainauth_ver_docs.html', 
+                           submitted_docs=progress.json["submitted_documents"], 
+                           missing_docs=progress.json["missing_documents"])
+
+
+
+# function to generate a dashboard for the end user with dynamic data
+def generate_doc_status_dashboard(user_id):
+    """
+    Generate a dashboard for the end user with dynamic data.
+
+    Args:
+        user_id (int): The ID of the current user.
+
+    Returns:
+        dict: A dictionary containing document status and registration progress.
+    """
+    # Fetch documents from the database
+    documents = Document.query.filter_by(user_id=user_id).all()
+
+    # Format documents for the dashboard
+    formatted_documents = []
+    for doc in documents:
+        formatted_documents.append({
+            "name": doc.document_type,  # Use document_type as the name
+            "submitted": doc.submitted_status,
+            "reviewed": doc.reviewed_status,
+            "approved": doc.approved_status,
+        })
+
+    # Fetch registration progress
+    progress = get_registration_progress(user_id)
+
+    return {
+        "submitted_documents": formatted_documents,
+        "registration_progress": progress,
+    }
+
+# define a function to generate a dashboard card for the health and safety complianee for the 
+def extract_status(json_field, field_name):
+    """Ensure JSON is properly parsed and extract 'status'."""
+    print(f"🛠 Extracting {field_name}: Raw Data -> {json_field}")  # Debugging Output
+
+    if not json_field or json_field == []:
+        print(f"⚠️ Warning: {field_name} is empty. Defaulting to 'pending'.")
+        return "pending"
+
+    try:
+        if isinstance(json_field, str):
+            print(f"🔄 Converting string to JSON for {field_name} -> {json_field}")  
+            json_field = json.loads(json_field.replace("'", "\""))  # Convert JSON string if needed
+
+        if isinstance(json_field, dict):
+            print(f"✅ Parsed {field_name}: {json_field}")  # Debugging Output
+
+            if field_name == "Employees":
+                return "compliant" if json_field.get("total") else "pending"
+
+            if "status" in json_field:
+                return json_field["status"]
+            else:
+                print(f"⚠️ No 'status' key found in {field_name} -> {json_field}")
+                return "pending"
+    except Exception as e:
+        print(f"❌ Error processing {field_name}: {e} | Data: {json_field}")  
+        return "pending"
+
+    return "pending"
+
+
+
+
+
+def get_health_compliance_data(user_id):
+    """Fetch and format health compliance data for the dashboard."""
+    health_compliance = HealthCompliance.query.filter_by(user_id=user_id).first()
+
+    if not health_compliance:
+        return {"compliant": [], "missing": []}
+
+    compliance_items = {
+        "Sanitary Facilities": health_compliance.sanitary_facilities,
+        "Cleaning Facilities": health_compliance.cleaning_facilities,
+        "Handwashing Stations": health_compliance.handwashing_stations,
+        "Waste Disposal": health_compliance.waste_disposal,
+        "Food Handling": health_compliance.food_handling,
+        "Food Storage": health_compliance.food_storage,
+        "Food Preparation": health_compliance.food_preparation,
+        "Food Prep Tools": health_compliance.food_prep_tools,
+        "Employees": health_compliance.employees
+    }
+
+    print(f"📌 Raw Database Data: {compliance_items}")  # Debugging - Print Raw Data
+
+    compliant = []
+    missing = []
+
+    for name, field in compliance_items.items():
+        print(f"📌 Processing {name}: {field}")  # Debugging - Check Raw Data from DB
+        status = extract_status(field, name)  # Pass field name for debugging
+
+        if status == "compliant":
+            compliant.append({"name": name, "status": "compliant"})
+        else:
+            missing.append({"name": name, "status": "pending"})
+
+    result = {"compliant": compliant, "missing": missing}
+
+    print(f"✅ FINAL Compliance Data: {result}")  # Debugging output
+    return result
+
+
+
+
+
+# dashboard route for the store and documents status, verifcation and approval
+@spachainauth.route('/dashboard', methods=['GET'])
+@login_required
+def spachainauth_dashboard():
+    """
+    Render the document view page with submitted and missing documents.
+    """
+    # Generate dashboard data
+    dashboard_data = generate_doc_status_dashboard(current_user.id)
+
+    # Fetch health compliance data
+    compliance_data = get_health_compliance_data(current_user.id)
+
+    print(f"Dashboard Data: {compliance_data}")
+
+    # Render the template with the dashboard data
+    return render_template('spachainauth_dashboard.html',
+                           submitted_docs=dashboard_data["submitted_documents"],
+                           compliance_data=compliance_data,
+                           registration_progress=dashboard_data["registration_progress"])
 
 
 

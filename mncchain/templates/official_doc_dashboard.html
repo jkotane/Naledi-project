@@ -1,0 +1,63 @@
+{% extends "officialbase.html" %}
+
+{% block title %}Official Document Review{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="text-center">Document Review</h2>
+
+    {% for store_id, store_data in store_documents.items() %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5>{{ store_data.store_name }} (ID: {{ store_id }})</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Document Type</th>
+                        <th>Uploaded File</th>
+                        <th>Status</th>
+                        <th>Uploaded Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for doc in store_data.documents %}
+                    <tr>
+                        <td>{{ doc.document_type }}</td>
+                        <td>
+                            {% if doc.file_url %}
+                                <a href="{{ doc.file_url }}" target="_blank" class="btn btn-info">📄 View</a>
+                            {% else %}
+                                <span class="text-muted">Not Uploaded</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if doc.approved_status == "approved" %}
+                                <span class="badge bg-success">✅ Approved</span>
+                            {% elif doc.reviewed_status == "pending" %}
+                                <span class="badge bg-warning">🟡 Pending</span>
+                            {% else %}
+                                <span class="badge bg-danger">❌ Rejected</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if doc.uploaded_at %}
+                                {{ doc.uploaded_at.strftime('%Y-%m-%d %H:%M') }}
+                            {% else %}
+                                <span class="text-muted">N/A</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+
+    <div class="text-center mt-4">
+        <a href="{{ url_for('mncview.official_store_dashboard') }}" class="btn btn-secondary">⬅️ Back to Dashboard</a>
+    </div>
+</div>
+{% endblock %}
