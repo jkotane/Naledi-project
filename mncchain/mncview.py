@@ -10,8 +10,8 @@ from flask import Blueprint, render_template, request, flash, redirect, url_for,
 from flask_login import login_required, current_user
 from naledi.naledimodels import db, MncUser, MncDepartment, StoreDetails, Municipal,  HealthCompliance, UserProfile, SpazaOwner,Document
 from functools import wraps
-from naledi import official_login_manager
-from naledi.utils import fetch_data, generate_dashboard_layout, allowed_file, upload_to_gcs , get_storage_client, generate_signed_url,get_access_token, generate_temporary_download_url,exchange_id_token_for_access_token
+from naledi import official_login_manager, exchange_id_token_for_access_token, get_storage_client
+from naledi.utils import fetch_data, generate_dashboard_layout, allowed_file, upload_to_gcs , generate_signed_url,get_access_token, generate_temporary_download_url
 import dash
 import dash_bootstrap_components as dbc
 import plotly.express as px
@@ -19,6 +19,9 @@ from datetime import datetime, timedelta
 import os
 from google.cloud import storage
 import requests
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from sqlalchemy import select
 
 
 
@@ -434,7 +437,10 @@ def official_doc_dashboard():
     """Document dashboard: View Candidate stores documents uploaded"""
     print(f"🚀 Reached Store document dashboard route! User: {current_user}")
 
-    file_list = list_files_with_manual_token()
+    #file_list = list_files_with_manual_token() previouslt used this function
+    #file_list = list_files_with_token()
+
+    file_list = list_files_for_officials()
     print("📂 Files in GCS bucket:", file_list)
 
     if not current_user.is_authenticated:
@@ -450,6 +456,7 @@ def official_doc_dashboard():
         return redirect(url_for('mncauth.official_login'))
 
     official_municipality = current_user.municipalid
+    print(f"🔹 Official Municipality: {official_municipality}"  )
 
     if not official_municipality:
         flash("No official-municipality assignment data found.", "error")
@@ -458,7 +465,33 @@ def official_doc_dashboard():
     # ✅ Fetch all stores with their documents, grouped by store
     store_documents = {}
 
+    # Step 1: Subquery for provinces that exist in municipal
+    """province_subquery = (
+       select(StoreDetails.province)
+       .join(Municipal, StoreDetails.province == Municipal.mncprov)
+    .filter(Municipal.id == official_municipality)
+     )
+    """
     results = (
+    db.session.query(
+        StoreDetails.store_id,
+        StoreDetails.store_name,
+        Document.document_type,
+        Document.uploaded_at.label("uploaded_at"),
+        Document.reviewed_status,
+        Document.approved_status,
+        Document.file_url
+    )
+    .join(SpazaOwner, StoreDetails.owner_id == SpazaOwner.id)  # ✅ Join on owner_id → SpazaOwner.id
+    .outerjoin(Document, SpazaOwner.user_id == Document.user_id)  # ✅ Join SpazaOwner → Document via user_id
+    .join(Municipal, StoreDetails.district_mnc == Municipal.mncname)
+    .filter(Municipal.id == official_municipality)
+    .order_by(StoreDetails.store_id, Document.uploaded_at.desc())
+    .all()
+) 
+
+    # Step 2: Main query with filter by provinces from the subquery
+    """ results = (
         db.session.query(
             StoreDetails.store_id,
             StoreDetails.store_name,
@@ -468,13 +501,18 @@ def official_doc_dashboard():
             Document.approved_status,
             Document.file_url
         )
-        .outerjoin(Document, StoreDetails.owner_id == Document.user_id)
-        .filter(Municipal.id == official_municipality)
-        .order_by(StoreDetails.store_id, Document.uploaded_at.desc())  # ✅ Sort by store first, then date
+        .join(Document, StoreDetails.owner_id == Document.user_id)
+        .filter(StoreDetails.province.in_(province_subquery))  # ✅ now properly formed
+        .order_by(StoreDetails.store_id, Document.uploaded_at.desc())
         .all()
-    )
+     )
+    """
+
 
     # ✅ Process query results and group by store
+
+    file_list = list_files_for_officials() # ✅ Now pass it here   
+    
     for row in results:
         store_id = row.store_id
         store_name = row.store_name
@@ -486,16 +524,56 @@ def official_doc_dashboard():
                 "documents": []  # List of docs for this store
             }
 
-        file_url = None
-        if row.file_url:
-            bucket_name = os.getenv("GCS_BUCKET_NAME").replace("gs://", "")  # Remove gs:// prefix
-            blob_name = row.file_url.split("/")[-1]  # Extract filename from URL
+    # if this does not work - the previous sort of working route will be used and the view access will have to be fixed
+    file_url = None
+    if row.file_url:
+        bucket_name = os.getenv("GCS_BUCKET_NAME").replace("gs://", "")
+         # Detect if row.file_url is a URL or a blob path
+       # if row.file_url.startswith("http"):
+        # Already a URL – use as-is (but append token if needed)
 
-            # Fetch the access token
-            access_token = get_access_token()
 
-            # Generate a temporary download URL using the access token
-            file_url = generate_temporary_download_url(bucket_name, blob_name, access_token)
+        id_token = session.get("azure_id_token")
+        if not id_token:
+          raise Exception("No ID token in session.")
+
+        access_token = exchange_id_token_for_access_token(id_token)
+
+        if "storage.googleapis.com" in row.file_url:     # assume its a full URL , extract the blob path
+           
+            try: 
+               blob_name = row.file_url.split(f"{bucket_name}/")[-1]  # Extract blob path from URL
+            except IndexError as e:  
+                print(f"⚠️ Could not extract blob_name from URL: {row.file_url}")
+                blob_name = None 
+        else:
+        # Not a URL – assume blob path like "43/filename"
+          blob_name = row.file_url
+
+
+        if blob_name and blob_name in file_list:
+           print(f"✅ Match found in GCS for blob: {blob_name}")
+        else:
+          print(f"❌ Blob {blob_name} not found in GCS file list.")
+   
+
+        # only build URL if the blobname is valid
+        if blob_name:
+           file_url = f"https://storage.googleapis.com/{bucket_name}/{blob_name}?access_token={access_token}"
+           print(f"✅ Final File URL: {file_url}")
+        else:
+            file_url = None
+
+
+        """ id_token = session.get("azure_id_token")
+        if not id_token:
+          raise Exception("No ID token in session.")
+
+        access_token = exchange_id_token_for_access_token(id_token) """
+
+            # ✅ Manual signed URL
+       # file_url = f"https://storage.googleapis.com/{bucket_name}/{blob_name}?access_token={access_token}"
+        print(f"✅ file URLs: {file_url}")
         
         # Append document details
         store_documents[store_id]["documents"].append({
@@ -506,10 +584,32 @@ def official_doc_dashboard():
             "file_url": file_url  # Use the temporary download URL
         })
 
-    print(f"✅ Grouped Store Documents: {store_documents}")
+    print(f"✅ file URLs: {file_url}")
 
     return render_template('official_doc_dashboard.html', store_documents=store_documents)
 
+@mncview.route('/update_doc_status', methods=['POST'])
+@login_required
+@official_required
+def update_doc_status():
+    file_url = request.form.get('file_url')
+    doc_type = request.form.get('doc_type')
+    action = request.form.get('action')  # 'approve' or 'reject'
+
+    document = Document.query.filter_by(file_url=file_url, document_type=doc_type).first()
+    if document:
+        if action == 'approve':
+            document.approved_status = 'approved'
+            document.reviewed_status = 'reviewed'
+        elif action == 'reject':
+            document.approved_status = 'rejected'
+            document.reviewed_status = 'reviewed'
+        db.session.commit()
+        flash(f'Document {action}d successfully.', 'success')
+    else:
+        flash('Document not found.', 'error')
+
+    return redirect(url_for('mncview.official_doc_dashboard'))
 
 
 # define the route to list files in the buckeet
@@ -523,36 +623,42 @@ def list_files():
     return jsonify({"files": files})
 
 
-def list_files_with_token():
-    """List files in a GCS bucket using an access token."""
-    access_token = get_access_token()
-    storage_client = storage.Client(credentials=access_token)
+def list_files_with_token(access_token):
+    """List files in a GCS bucket using a valid access token (STS exchange)."""
+    creds = Credentials(token=access_token)
+
+    # ❌ DO NOT refresh this credential – just use it
+    storage_client = storage.Client(credentials=creds)
+
     bucket_name = os.getenv("GCS_BUCKET_NAME").replace("gs://", "")
     blobs = storage_client.list_blobs(bucket_name)
     files = [blob.name for blob in blobs]
     return files
 
-
-
-def list_files_with_manual_token():
-    from google.cloud import storage
-    from google.oauth2.credentials import Credentials
-
-    # 🔐 Retrieve the Azure ID token from session or secure storage
-    id_token = session.get("azure_id_token")  # Make sure you store it after login
-
+def list_files_for_officials():
+    """List ALL files in GCS bucket using token from Azure session."""
+    id_token = session.get("azure_id_token")
     if not id_token:
-        raise Exception("No ID token found. User not authenticated via Azure.")
+        raise Exception("No ID token in session.")
 
-    # 🔄 Exchange for Google access token
-    access_token = get_access_token(id_token=session.get("azure_id_token"))
-
-    # ⚙️ Authenticate with GCP using the exchanged token
+    access_token = exchange_id_token_for_access_token(id_token)
     creds = Credentials(token=access_token)
-
     storage_client = storage.Client(credentials=creds)
+
     bucket_name = os.getenv("GCS_BUCKET_NAME").replace("gs://", "")
-    blobs = storage_client.list_blobs(bucket_name)
-    return [blob.name for blob in blobs]
+    bucket = storage_client.bucket(bucket_name)
+
+    print(f"📂 Accessing bucket: {bucket_name}")
+
+    # List ALL blobs in the bucket (ensure pagination handled)
+    blobs_iterator = storage_client.list_blobs(bucket)
+    file_list = []
+    for blob in blobs_iterator:
+        print(f"📁 Found blob: {blob.name}")
+        file_list.append(blob.name)
+
+    print(f"📂 Total files found: {len(file_list)}")
+    return file_list
+
 
 

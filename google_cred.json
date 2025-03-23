@@ -1,6 +1,6 @@
 {
     "type": "external_account",
-    "audience": "//iam.googleapis.com/locations/global/workforcePools/nalediofficials/providers/afrinnovaeprovider",
+    "audience": "//iam.googleapis.com/locations/global/workforcePools/nalediofficials/providers/afrinnovaeprovider2",
     "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
     "token_url": "https://sts.googleapis.com/v1/token",
     "credential_source": {

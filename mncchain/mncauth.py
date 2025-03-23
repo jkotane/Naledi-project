@@ -9,7 +9,7 @@ from functools import wraps
 from naledi import azure,official_login_manager
 from itsdangerous import SignatureExpired, BadSignature
 import smtplib
-import re
+import re, os
 import jwt, requests
 from werkzeug.security import check_password_hash
   
@@ -231,7 +231,9 @@ def official_azure_callback():
 
         print(f"🔐 Azure Token Response: {token}")  # Optional: Debug log
 
-        # ✅ Store Azure ID token in session for GCP access later
+        gcp_audience = os.getenv("GCP_AUDIENCE")
+        print(f"✅ GCP Audience Loaded inside azure callback: {gcp_audience}")
+
          #✅ Store Azure ID token in session for GCP access later
         id_token = token.get('id_token')
         if id_token:

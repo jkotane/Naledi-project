@@ -18,11 +18,16 @@ from itsdangerous import URLSafeTimedSerializer
 import google.auth
 from google.auth import  default
 from google.cloud import storage
-from  . import get_credentials
+from  . import get_credentials, exchange_id_token_for_access_token, get_storage_client
 from google.auth import load_credentials_from_file
 from google.auth.transport.requests import Request
 import json
 import requests
+from google.cloud import storage
+from google.oauth2.credentials import Credentials
+import os
+from flask import session
+
 
 
 
@@ -95,12 +100,12 @@ def verify_reset_token(token, expires_sec=1800):
 
 
 
-def get_storage_client():
-    """Returns a Google Cloud Storage client, initializes if not set."""
-    if 'storage_client' not in g:
-        creds, project = google.auth.default()
-        g.storage_client = storage.Client(credentials=creds)
-    return g.storage_client
+#def get_storage_client():
+#    """Returns a Google Cloud Storage client, initializes if not set."""
+#    if 'storage_client' not in g:
+#        creds, project = google.auth.default()
+#        g.storage_client = storage.Client(credentials=creds)
+#    return g.storage_client
 
 
 # Helper fucntions for store users
@@ -156,7 +161,7 @@ def upload_to_gcs(file, destination_blob_name):
     # Authenticate with Workload Identity or ADC
     storage_client = storage.Client()
 
-    bucket_name = "spaza-docs-bucket"  # Change to your bucket name
+    bucket_name = os.getenv("GCS_BUCKET_NAME", "spaza-docs-bucket")
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(destination_blob_name)
 
@@ -167,9 +172,6 @@ def upload_to_gcs(file, destination_blob_name):
     #signed_url = blob.generate_signed_url(expiration=timedelta(minutes=15))
 
     return f"https://storage.googleapis.com/{bucket_name}/{destination_blob_name}"
-
-
-
 
 
 def authenticate_ad_user(username, password):
@@ -298,32 +300,17 @@ def generate_signed_url(bucket_name, blob_name, expiration=3600):
     return url
 
 
-# define the function to get access to the storage client
-def get_storage_client():
-    """Initialize and return a Google Cloud Storage client using Workforce Identity Federation credentials."""
-    credentials = get_credentials()  # Fetch credentials
-    storage_client = storage.Client(credentials=credentials)
-    return storage_client
-
-
-
 def get_access_token(id_token=None):
+    """Get access token from STS exchange using Azure ID token."""
     if id_token:
         return exchange_id_token_for_access_token(id_token)
 
-    # Fallback to default Google credential loading
-    creds, _ = load_credentials_from_file(
-        '/Users/jackykotane/projects/naledi/google_cred.json',
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
-    )
-
-    try:
-        creds.refresh(Request())
-    except Exception as e:
-        print("❌ OAuthError:", e.args[1])
-        raise
-
-    return creds.token
+    # Use access token from session
+    access_token = session.get("google_access_token")
+    if not access_token:
+        raise Exception("No access token found in session.")
+    
+    return access_token
 
 
 
@@ -349,30 +336,6 @@ def generate_temporary_download_url(bucket_name, blob_name, access_token):
         print(f"Error fetching file: {response.status_code} - {response.text}")
         return None
     
-
-def exchange_id_token_for_access_token(id_token):
-    import requests
-
-    audience = "//iam.googleapis.com/locations/global/workforcePools/nalediofficials/providers/afrinnovaeprovider"
-    token_url = "https://sts.googleapis.com/v1/token"
-
-    data = {
-        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-        "audience": audience,
-        "scope": "https://www.googleapis.com/auth/cloud-platform",
-        "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
-        "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
-        "subject_token": id_token,
-    }
-
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    response = requests.post(token_url, data=data, headers=headers)
-
-    if response.status_code != 200:
-        print("❌ Token exchange failed:", response.text)
-        raise Exception("Token exchange failed")
-
-    return response.json().get("access_token")
 
 
 

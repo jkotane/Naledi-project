@@ -93,15 +93,25 @@ def get_registration_progress(user_id):
 @spachainauth.route('/register', methods=['GET', 'POST'])
 @login_required
 def spachainauth_register():
+    user_profile = current_user if isinstance(current_user, UserProfile) else None
+
+    if not user_profile:
+        flash('User profile not loaded correctly. Please complete your profile first.', category='error')
+        return redirect(url_for('naledi.naledi_sign_up'))
+
+    user_id = user_profile.id
+    email = user_profile.email
+    cellno = user_profile.cellno
+
+    print(f"🔹 UserProfile loaded: ID={user_id}, Email={email}, Cell={cellno}")
+
     if request.method == 'POST':
-        user_id = current_user.id
+        # Form inputs
         business_type = request.form.get('businessType')
         first_name = request.form.get('firstName')
         last_name = request.form.get('lastName')
         dob = request.form.get('dob')
         gender = request.form.get('gender')
-        email = current_user.email
-        cellno = current_user.cellno
         citizenship = request.form.get('citizenship')
         id_number = request.form.get('saId')
         street_address = request.form.get('streetAddress')
@@ -111,44 +121,6 @@ def spachainauth_register():
         postal_code = request.form.get('postcode')
         district_mnc = request.form.get('municipality')
 
-
-        # check if the user profile exsits:
-
-        user_profile = UserProfile.query.filter_by(id=user_id).first()
-        print(f"User profile User ID is: {user_id}")
-
-        if not user_profile:
-            flash('No user profile found. Please complete your profile first.', category='error')
-            return redirect(url_for('naledi.naledi_sign_up'))
-        else:
-            user_id = user_profile.id
-            email = user_profile.email
-            cellno = user_profile.cellno    
-            print(f" User ID is: {user_id}, email is: {email}, cell number is: {cellno}")
-        
-        try:
-             # Ensure user profile exists
-
-            existing_owner = SpazaOwner.query.filter_by(user_id=user_id).first()
-            
-            if not existing_owner:
-                new_owner = SpazaOwner(
-                    name=first_name.strip(),
-                    surname=last_name.strip(),
-                    email=email,
-                    address=street_address.strip(),
-                    said=id_number.strip() if id_number else 'N/A',
-                    user_id=user_profile.id
-                )
-                db.session.add(new_owner)
-                db.session.commit()
-                flash('Spaza Owner registration successful!', category='success')
-            else:
-                flash('Spaza Owner already exists.', category='error')
-        except Exception as e:
-            db.session.rollback()
-            flash(f"An error occurred: {str(e)}", category='error')
-        
         # Validate required fields
         required_fields = {
             "Business Type": business_type, "First Name": first_name,
@@ -158,18 +130,44 @@ def spachainauth_register():
             "Postal Code": postal_code, "Province": province, "District": district_mnc
         }
 
-        print(f"Store details: {required_fields}")
-        
-        missing_fields = [field for field, value in required_fields.items() if not value]
+        print(f"📝 Collected Registration Data: {required_fields}")
 
+        missing_fields = [field for field, value in required_fields.items() if not value]
         if missing_fields:
             flash(f"Please provide values for: {', '.join(missing_fields)}", category='error')
             return redirect(url_for('spachainauth.spachainauth_register'))
 
-        # Check if registration already exists
+        try:
+            # Check if SpazaOwner exists for user
+            existing_owner = SpazaOwner.query.filter_by(user_id=user_id).first()
+            if not existing_owner:
+                new_owner = SpazaOwner(
+                    name=first_name.strip(),
+                    surname=last_name.strip(),
+                    email=email,
+                    address=street_address.strip(),
+                    said=id_number.strip() if id_number else 'N/A',
+                    user_id=user_id
+                )
+                db.session.add(new_owner)
+                db.session.commit()
+                flash('Spaza Owner registration successful!', category='success')
+                print(f"✅ SpazaOwner created: {new_owner}")
+            else:
+                flash('Spaza Owner already exists.', category='info')
+                print(f"ℹ️ Existing SpazaOwner found for User ID: {user_id}")
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f"An error occurred during owner registration: {str(e)}", category='error')
+            print(f"❌ Error during SpazaOwner creation: {str(e)}")
+            return redirect(url_for('spachainauth.spachainauth_register'))
+
+        # Check if RegistrationForm already exists
         existing_registration = RegistrationForm.query.filter_by(user_id=user_id).first()
         if existing_registration:
             flash('You are already registered. Please update your details if needed.', category='info')
+            print(f"ℹ️ Existing registration found: {existing_registration}")
             return redirect(url_for('naledi.naledi_home'))
 
         try:
@@ -193,36 +191,40 @@ def spachainauth_register():
             )
             db.session.add(registration)
             db.session.commit()
-            flash('Main Registration successful!', category='success')
-            return redirect(url_for('naledi.naledi_home'))  # Redirect to home after successful registration
-        except    Exception as e:
+            flash('Main registration successful!', category='success')
+            print(f"✅ RegistrationForm created: {registration}")
+            return redirect(url_for('naledi.naledi_home'))
+
+        except Exception as e:
             db.session.rollback()
-            flash(f"An error occurred: {str(e)}", category='error')
+            flash(f"An error occurred during registration: {str(e)}", category='error')
+            print(f"❌ Error during RegistrationForm creation: {str(e)}")
             return redirect(url_for('spachainauth.spachainauth_register'))
+
     return render_template('spachainauth_register.html', title='Spaza Owner Registration')
+
    
 # owner details for the spaza shop owner
 @spachainauth.route('/owner-details/<int:user_id>', methods=['GET', 'POST'])
 @login_required
 def spachainauth_owner_details(user_id):
-    # Get the user profile
     user = UserProfile.query.get(user_id)
-    
-    # If the user doesn't exist, redirect with an error message
+
     if not user:
         flash('No user profile exists. Ensure your registration is completed.', category='error')
         return redirect(url_for('naledi.naledi_sign_up'))
 
-    # Initialize owner variable to None
     owner = None
 
     if request.method == 'POST':
-        id_number = request.form.get('id_number')
+        # Get form data
+        name = request.form.get('name')
+        surname = request.form.get('surname')
+        email = request.form.get('email')
         address = request.form.get('address')
-        lesee_name = request.form.get('lesee_name')
-        store_name = request.form.get('store_name')
+        said = request.form.get('said')
 
-        # Check if owner details already exist for the user
+        # Check if owner details already exist for this user
         owner = SpazaOwner.query.filter_by(user_id=user.id).first()
         if owner:
             flash('Owner details already exist.', category='error')
@@ -231,21 +233,22 @@ def spachainauth_owner_details(user_id):
         # Add new owner details
         new_owner = SpazaOwner(
             user_id=user.id,
-            id_number=id_number,
+            name=name,
+            surname=surname,
+            email=email,
             address=address,
-            lesee_name=lesee_name,
-            store_name=store_name
+            said=said
         )
         db.session.add(new_owner)
         db.session.commit()
         flash('Owner details saved successfully!', category='success')
         return redirect(url_for('spachainauth.spachainauth_owner_details', user_id=new_owner.user_id))
 
-    # If it's a GET request, try to get the existing owner details
-    owner = SpazaOwner.query.filter_by(id=user.id).first()
+    # GET request — correctly fetch owner using user_id
+    owner = SpazaOwner.query.filter_by(user_id=user.id).first()
 
-    # Render the template and pass the user and owner details
     return render_template("spachainauth_owner_details.html", user=user, owner=owner)
+
 
 
 # route for the owner to be able to regisyte the store details

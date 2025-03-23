@@ -22,6 +22,7 @@ from flask_session import Session
 import google.auth
 from google.auth import  default, identity_pool
 from google.cloud import storage
+from google.oauth2.credentials import Credentials
 
 
 
@@ -54,17 +55,26 @@ AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
 if not AZURE_TENANT_ID:
     raise ValueError("Azure Tenant ID is missing. Set the AZURE_TENANT_ID environment variable.")
 
+
+# Retrieve the GCP audiwnce
+GCP_AUDIENCE =os.getenv("GCP_AUDIENCE").strip()
+
+print(f"✅ GCP Audience Loaded inside init  before get_credentials : {GCP_AUDIENCE}")
+
 # Retrieve configuration values
 def get_credentials():
     """Fetch Workforce Identity Federation credentials."""
     WORKFORCE_POOL_ID = os.getenv("WORKFORCE_POOL_ID")
     PROVIDER_ID = os.getenv("WORKFORCE_PROVIDER_ID")
     SERVICE_ACCOUNT_EMAIL = os.getenv("SERVICE_ACCOUNT_EMAIL")
-    AUDIENCE = f"//iam.googleapis.com/locations/global/workforcePools/{WORKFORCE_POOL_ID}/providers/{PROVIDER_ID}"
+    #GCP_AUDIENCE = f"//iam.googleapis.com/locations/global/workforcePools/{WORKFORCE_POOL_ID}/providers/{PROVIDER_ID}"
+
+    print(f"✅ GCP Audience Loaded inside init app callback: {GCP_AUDIENCE}")
+
 
     credentials = identity_pool.Credentials.from_info({
         "type": "external_account",
-        "audience": AUDIENCE,
+        "audience": GCP_AUDIENCE,
         "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
         "token_url": "https://sts.googleapis.com/v1/token",
         "credential_source": {
@@ -75,6 +85,41 @@ def get_credentials():
     return credentials
 
 
+# temporary function to try and get an azure token for exhange with a googl access token.
+# this function needs to be called in the azure callback 
+def exchange_id_token_for_access_token(id_token):
+    sts_url = "https://sts.googleapis.com/v1/token"
+    audience = GCP_AUDIENCE  # Already loaded
+
+    print(f"✅ GCP Audience Loaded inside exchange ID token function: {audience}")
+
+    if not audience:
+        raise Exception("❌ GCP_AUDIENCE not set in environment.")
+
+    data = {
+        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+        "audience": audience,
+        "scope": "https://www.googleapis.com/auth/cloud-platform",
+        "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
+        "subject_token": id_token
+    }
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    response = requests.post(sts_url, data=data, headers=headers)
+
+    if response.status_code == 200:
+        access_token = response.json().get("access_token")
+        print("✅ STS token exchange success.")
+        return access_token
+    else:
+        print(f"❌ Token exchange failed: {response.json()}")
+        raise Exception("STS Token Exchange Failed")
+
+
+def get_storage_client(access_token):
+    creds = Credentials(token=access_token)
+    return storage.Client(credentials=creds)
 
 
 # include the bucket-name for official users
@@ -94,11 +139,6 @@ azure = oauth.register(
     jwks_uri=f'https://login.microsoftonline.com/{AZURE_TENANT_ID}/discovery/v2.0/keys',
     redirect_uri="http://localhost:5001/official/azure/callback"  # Hardcoded for local testing
 )
-
-
-
-
-
 
 # verify the azure token 
 def verify_azure_token(id_token):
@@ -129,8 +169,6 @@ def verify_azure_token(id_token):
 
 
 
-
-
 def create_app(app_type="official"):
     """Application factory pattern"""
     app = Flask(__name__)
@@ -146,7 +184,7 @@ def create_app(app_type="official"):
    
 
     if app_type is None:
-        app_type = os.getenv("FLASK_APP_TYPE", "official")  # Default to store
+        app_type = os.getenv("FLASK_APP_TYPE", "store")  # Default to store
 
     print(f"✅ Flask App Type: {app_type}")  # Debugging
 
